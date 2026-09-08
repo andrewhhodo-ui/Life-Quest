@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4I</title>
+<title>Life Quest Prototype v4M</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -65,6 +65,8 @@ textarea{min-height:86px}
 .option-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .cornerstone{border:1px solid var(--line);background:#151c24;border-radius:14px;padding:14px;text-align:center;cursor:pointer}
 .cornerstone strong{display:block;margin-top:8px;font-size:13px}
+.cornerstone.disabled{opacity:.35;cursor:not-allowed;filter:grayscale(1)}
+.focus-panel .card{margin:9px 0}.focus-empty{text-align:center;padding:28px 14px;color:var(--muted)}
 .tabs{display:flex;gap:8px;margin:10px 0}
 .tab{flex:1;padding:10px;border-radius:12px;border:1px solid var(--line);background:#151c24;color:var(--text);font-weight:700}
 .tab.active{background:var(--accent);color:#221700}
@@ -102,10 +104,11 @@ const DEFAULT={
   chapterQuests:[],subQuests:[],
   constructionReadyAt:null,constructionStage:0,
   selectedHex:null,placedCornerstones:[],helpSeen:{chapter:false,rarity:false},detailReturn:'home',
+  focusChapterId:null,focusTab:'due',movingCornerstone:null,
   requirements:{
     freeQuestCreated:false,freeQuestCompleted:false,
     questLogChecked:false,characterChecked:false,cornerstonePlaced:false,
-    chapterCreated:false,subQuestCreated:false,childQuestCreated:false,childQuestCompleted:false
+    chapterCreated:false,subQuestCreated:false,childQuestCreated:false,childQuestCompleted:false,focusSelected:false
   }
 };
 
@@ -150,7 +153,7 @@ function getTutorial(id){return state.tutorialQuests.find(q=>q.id===id)}
 function cornerAt(i){return state.placedCornerstones.find(c=>c.hex===i)}
 function unlockedHexIds(){return state.outerRingUnlocked?Array.from({length:18},(_,i)=>i):[0,1,2,3,4,5]}
 function emptyHexes(){return unlockedHexIds().filter(i=>!cornerAt(i))}
-function canPlaceCornerstone(){return state.cornerstoneUnlocked&&emptyHexes().length>0}
+function canPlaceCornerstone(){const standardNames=new Set(CORNERS?.map?.(o=>o[1])||[]),placed=new Set(state.placedCornerstones.map(c=>c.name));return state.cornerstoneUnlocked&&emptyHexes().length>0&&[...standardNames].some(n=>!placed.has(n))}
 function axialRing(radius){
   const dirs=[[1,0],[0,1],[-1,1],[-1,0],[0,-1],[1,-1]];
   let q=0,r=-radius,out=[];
@@ -188,6 +191,7 @@ function syncTutorial(){
   if(state.requirements.chapterCreated) addTutorial('t5','Create Your First Sub-Quest',1,'Create a Sub-Quest inside your Chapter Quest, then return here.','subQuestCreated');
   if(state.requirements.subQuestCreated) addTutorial('t6','Create an Active Quest',1,'Create an Active Quest inside your Sub-Quest, then return here.','childQuestCreated');
   if(state.requirements.childQuestCreated) addTutorial('t7','Complete Your Active Quest',1,'Complete the Active Quest inside your Sub-Quest, then return here.','childQuestCompleted');
+  if(state.requirements.childQuestCompleted) addTutorial('t8','Choose Your Focus Quest',1,'Choose the Chapter Quest that matters most to you right now. Your Focus Bubble will use it to show only a few manageable next steps.','focusSelected');
   save();
 }
 function requirementSatisfied(tq){
@@ -245,11 +249,42 @@ function hud(){
   const pct=Math.max(0,Math.min(100,Math.round(xpIntoCurrentLevel()/xpNeededForNextLevel()*100)));
   return `<div class="hud"><div class="badge"><strong>Lv ${state.level}</strong><div class="xpbar"><div class="xpfill" style="width:${pct}%"></div></div></div><div class="badge">${state.xp} XP · 🪙 ${state.coins}</div></div>`;
 }
-function focusText(){return currentTutorial()?'!':'No Focus Quest'}
+function focusText(){return currentTutorial()?'!':(state.focusChapterId?'Focus':'No Focus Quest')}
 function focusClick(){
-  const tq=currentTutorial();if(!tq)return;
-  state.detailReturn='home';state.currentQuest={kind:'tutorial',...tq};go('questDetail');
+  const tq=currentTutorial();
+  if(tq){state.detailReturn='home';state.currentQuest={kind:'tutorial',...tq};go('questDetail');return}
+  go('focusView');
 }
+function chooseFocusChapter(id){
+  if(!state.chapterQuests.some(c=>c.id===id))return;
+  state.focusChapterId=id;state.requirements.focusSelected=true;syncTutorial();save();go('focusView');
+}
+function focusEligible(q){return !q.completed && (!q.repeat || q.repeat==='Never')}
+function questDeadline(q){
+  if(!q.timeLimitDate)return null;
+  const t=q.timeLimitTime||'23:59';const d=new Date(`${q.timeLimitDate}T${t}:00`);return isNaN(d)?null:d;
+}
+function dueSoonQuests(){
+  const now=new Date(),limit=new Date(now.getTime()+3*24*60*60*1000);
+  return state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d&&x.d<=limit).sort((a,b)=>a.d-b.d).slice(0,2).map(x=>x.q);
+}
+function focusChapterQuests(){
+  if(!state.focusChapterId)return [];
+  const subs=new Set(state.subQuests.filter(s=>s.chapterId===state.focusChapterId).map(s=>s.id));
+  return state.quests.filter(q=>subs.has(q.parentSubQuestId)&&focusEligible(q)).sort(activeQuestSort).slice(0,3);
+}
+function focusQuestCard(q){const d=questDeadline(q);const due=d?`${d<new Date()?'Overdue · ':''}${q.timeLimitDate}${q.timeLimitTime?' · '+q.timeLimitTime:' · End of day'}`:'No deadline';return `<div class="card" onclick="openLoggedQuest('${q.id}',false)"><div class="between"><strong>${esc(q.title)}</strong><span>${starDisplay(q.stars,q.earnedStars||0,q.completed)}</span></div><div class="sub small">${esc(due)}</div></div>`}
+function setFocusTab(tab){state.focusTab=tab;save();render()}
+function focusView(){
+  const chapter=state.chapterQuests.find(c=>c.id===state.focusChapterId);
+  const due=dueSoonQuests(),fq=focusChapterQuests();
+  return `<div class="screen focus-panel"><h2>Focus</h2><div class="tabs"><button class="tab ${state.focusTab!=='focus'?'active':''}" onclick="setFocusTab('due')">Due Soon</button><button class="tab ${state.focusTab==='focus'?'active':''}" onclick="setFocusTab('focus')">Focus Quest</button></div>${state.focusTab==='focus'?`${chapter?`<div class="card"><div class="between"><div><strong>${esc(chapter.title)}</strong><div class="sub small">${esc(chapter.cornerstone)}</div></div><button class="btn" style="width:auto;margin:0" onclick="openHierarchyDetail('chapter','${chapter.id}')">Open Chapter</button></div></div>${fq.length?fq.map(focusQuestCard).join(''):'<div class="focus-empty">No non-repeatable Active Quests are waiting here.</div>'}<button class="btn primary" onclick="${state.subQuests.some(s=>s.chapterId===chapter.id)?`openCreateActiveQuest('${state.subQuests.find(s=>s.chapterId===chapter.id).id}')`:`openHierarchyDetail('chapter','${chapter.id}')`}">＋ Active Quest</button><button class="btn" onclick="go('focusChoose')">Change Focus Quest</button>`:`<div class="focus-empty">Choose a Chapter Quest to make it your Focus.</div><button class="btn primary" onclick="go('focusChoose')">Choose Focus Quest</button>`}`:`${due.length?due.map(focusQuestCard).join(''):'<div class="focus-empty">Nothing due in the next 3 days.</div>'}`}<button class="btn ghost" onclick="go('home')">Back</button></div>`;
+}
+function focusChoose(){
+  const active=state.chapterQuests;
+  return `<div class="screen"><h2>Choose Your Focus Quest</h2><p class="sub">Pick the Chapter Quest you most want to move forward right now.</p>${active.length?active.map(c=>`<div class="card" onclick="chooseFocusChapter('${c.id}')"><strong>${esc(c.title)}</strong><div class="sub small">${esc(c.cornerstone)} · ${esc(c.archetype||'')}</div></div>`).join(''):'<div class="card sub">Create a Chapter Quest first.</div>'}<button class="btn ghost" onclick="go('home')">Back</button></div>`;
+}
+
 function home(){
   syncTutorial();
   let toast='';
@@ -294,9 +329,9 @@ function questDetail(){
       <div class="field"><label>Time Limit Date</label><input disabled value="${esc(q.timeLimitDate||'—')}"></div>
       <div class="field"><label>Time Limit Time</label><input disabled value="${esc(q.timeLimitTime||'—')}"></div>
       <div class="field"><label>Repeat</label><select disabled><option>${esc(q.repeat||'Never')}</option></select></div>
-      <div class="field"><label>Reminder</label><select disabled><option>${esc(q.reminder||'None')}</option></select></div>
+      <div class="field"><label>Reminder</label><select disabled><option>${esc(q.reminder==='Custom'?(q.reminderDate?`${q.reminderDate}${q.reminderTime?' · '+q.reminderTime:' · End of day'}`:'Custom'):(q.reminder||'None'))}</option></select></div>
     </div>
-    <div class="sticky-actions">
+    ${q.kind==='tutorial'&&q.id==='t8'&&!state.requirements.focusSelected?`<button class="btn" onclick="go('focusChoose')">Choose Focus Quest</button>`:''}<div class="sticky-actions">
       <button class="btn primary" ${canComplete||q.completed?'':'disabled'} ${q.completed?'disabled':''} onclick="state.resolutionStars=0;go('resolve')">Complete Quest</button>
       <button class="btn" ${q.kind==='tutorial'?'disabled':''} onclick="app().innerHTML=questEditor('edit','${q.id}')">Edit Quest</button>
       <button class="btn ghost" onclick="go(state.detailReturn||'home')">Back</button>
@@ -382,9 +417,12 @@ function questEditor(mode='create', questId=null, defaults={}){
     <div class="field"><label>Start Date</label><input id="qeStartDate" type="date" value="${q?.startDate||todayISO()}"></div><div class="field"><label>Start Time</label><input id="qeStartTime" type="time" value="${q?.startTime||currentTimeHM()}"></div>
     <div class="field"><label>Time Limit Date</label><input id="qeEndDate" type="date" value="${q?.timeLimitDate||todayISO()}"></div><div class="field"><label>Time Limit Time</label><input id="qeEndTime" type="time" value="${q?.timeLimitTime||''}"></div>
     <div class="field"><label>Repeat</label><select id="qeRepeat">${['Never','Daily','Weekly','Monthly','Custom'].map(x=>`<option ${x===(q?.repeat||'Never')?'selected':''}>${x}</option>`).join('')}</select></div>
-    <div class="field"><label>Reminder</label><select id="qeReminder">${['None','At due time','15 min before','1 hour before','1 day before','Custom'].map(x=>`<option ${x===(q?.reminder||'None')?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="field"><label>Reminder</label><select id="qeReminder" onchange="toggleCustomReminder()">${['None','At due time','15 min before','1 hour before','1 day before','Custom'].map(x=>`<option ${x===(q?.reminder||'None')?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="field" id="customReminderDateWrap" style="${(q?.reminder||'None')==='Custom'?'':'display:none'}"><label>Reminder Date</label><input id="qeReminderDate" type="date" value="${q?.reminderDate||''}"></div>
+    <div class="field" id="customReminderTimeWrap" style="${(q?.reminder||'None')==='Custom'?'':'display:none'}"><label>Reminder Time (Optional)</label><input id="qeReminderTime" type="time" value="${q?.reminderTime||''}"><div class="sub small" style="margin-top:6px">Leave blank for end of day.</div></div>
   </div><div class="sticky-actions ${mode==='edit'?'':'two'}"><button class="btn primary" onclick="saveQuestEditor('${mode}','${questId||''}')">${mode==='edit'?'Save Changes':(type==='Cornerstone Quest'?'Create Active Quest':'Create Quest')}</button>${mode==='edit'?`<button class="btn danger" onclick="deleteQuest('${questId}')">Delete Quest</button>`:''}<button class="btn ghost" onclick="${mode==='edit'?"go('questDetail')":'cancelQuestEditorCreate()'}">${mode==='edit'?'Cancel':'Back'}</button></div></div>`;
 }
+function toggleCustomReminder(){const on=document.getElementById('qeReminder')?.value==='Custom';['customReminderDateWrap','customReminderTimeWrap'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=on?'':'none'})}
 function pickEditorStars(n){createStars=n;document.querySelectorAll('#qeStars .star').forEach(el=>{const on=Number(el.dataset.n)<=n;el.classList.toggle('gold',on);el.classList.toggle('empty',!on)})}
 function refreshQuestEditor(mode,id,cornerChanged=false,chapterChanged=false){
   const type=document.getElementById('qeType')?.value||'Free Quest',corner=document.getElementById('qeCorner')?.value||'',chapter=document.getElementById('qeChapter')?.value||'',sub=document.getElementById('qeSub')?.value||'';
@@ -393,7 +431,8 @@ function refreshQuestEditor(mode,id,cornerChanged=false,chapterChanged=false){
 function saveQuestEditor(mode,id){
   const title=document.getElementById('qeTitle').value.trim(), endDate=document.getElementById('qeEndDate').value;if(!title||!endDate){alert('Title and Time Limit Date are required.');return}
   const type=document.getElementById('qeType').value, sub=type==='Cornerstone Quest'?(document.getElementById('qeSub')?.value||''):'';if(type==='Cornerstone Quest'&&!sub){alert('Choose a Sub-Quest for this Active Quest.');return}
-  const base={type:type==='Free Quest'?'Free Quest':'Quest',title,description:document.getElementById('qeDesc').value.trim(),stars:createStars,startDate:document.getElementById('qeStartDate').value,startTime:document.getElementById('qeStartTime').value,timeLimitDate:endDate,timeLimitTime:document.getElementById('qeEndTime').value,repeat:document.getElementById('qeRepeat').value,reminder:document.getElementById('qeReminder').value,parentSubQuestId:type==='Cornerstone Quest'?sub:null};
+  const reminder=document.getElementById('qeReminder').value,reminderDate=document.getElementById('qeReminderDate')?.value||'',reminderTime=document.getElementById('qeReminderTime')?.value||'';if(reminder==='Custom'&&!reminderDate){alert('Choose a Reminder Date for a custom reminder.');return}
+  const base={type:type==='Free Quest'?'Free Quest':'Quest',title,description:document.getElementById('qeDesc').value.trim(),stars:createStars,startDate:document.getElementById('qeStartDate').value,startTime:document.getElementById('qeStartTime').value,timeLimitDate:endDate,timeLimitTime:document.getElementById('qeEndTime').value,repeat:document.getElementById('qeRepeat').value,reminder,reminderDate:reminder==='Custom'?reminderDate:'',reminderTime:reminder==='Custom'?reminderTime:'',parentSubQuestId:type==='Cornerstone Quest'?sub:null};
   if(mode==='edit'){const q=getQuest(id);if(!q)return;Object.assign(q,base);save();state.currentQuest={kind:'quest',...q};go('questDetail');return}
   const t2=getTutorial('t2'),isTutorialFree=type==='Free Quest'&&!!t2&&!t2.completed&&!state.requirements.freeQuestCreated;if(isTutorialFree&&createStars!==1){alert('For this tutorial, create a 1-star Free Quest.');return}
   const q={id:'q-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),...base,completed:false,earnedStars:0,createdAt:new Date().toISOString(),tutorialFree:isTutorialFree};state.quests.push(q);if(isTutorialFree)state.requirements.freeQuestCreated=true;if(type==='Cornerstone Quest'&&!state.requirements.childQuestCreated)state.requirements.childQuestCreated=true;const d=state.editorDefaults||{};state.editorDefaults={};syncTutorial();save();if(d.returnType&&d.returnId){openHierarchyDetail(d.returnType,d.returnId);return}go(type==='Cornerstone Quest'?'cornerstoneLanding':'home')
@@ -430,12 +469,14 @@ const ARCH={
 'Finances':['Banking','Investing','Shopping','Groceries','Dining','Online Shopping','Housing','Transportation'],
 'Spirituality':['Church','Synagogue','Mosque','Temple','Chapel','Sanctuary','Monastery','Shrine']
 };
-function cornerstonePick(){return `<div class="screen"><h2>Choose a Cornerstone</h2><p class="sub">Select the life area you want to place first.</p><div class="option-grid">${CORNERS.map(o=>`<div class="cornerstone" onclick="chooseCornerstone('${o[1]}','${o[0]}')"><div style="font-size:34px">${o[0]}</div><strong>${o[1]}</strong></div>`).join('')}</div><button class="btn ghost" onclick="go('createMenu')">Back</button></div>`}
-function chooseCornerstone(name,icon){state.pendingCornerstone={name,icon};save();if(state.selectedHex!=null&&!cornerAt(state.selectedHex))commitCornerstone(state.selectedHex);else go('placeCornerstone')}
+function cornerstonePick(){const placed=new Set(state.placedCornerstones.map(c=>c.name));return `<div class="screen"><h2>Choose a Cornerstone</h2><p class="sub">Each standard Cornerstone can be placed once.</p><div class="option-grid">${CORNERS.map(o=>{const used=placed.has(o[1]);return `<div class="cornerstone ${used?'disabled':''}" ${used?'':`onclick="chooseCornerstone('${o[1]}','${o[0]}')"`}><div style="font-size:34px">${o[0]}</div><strong>${o[1]}</strong>${used?'<div class="sub small">Placed</div>':''}</div>`}).join('')}</div><button class="btn ghost" onclick="go('createMenu')">Back</button></div>`}
+function chooseCornerstone(name,icon){if(state.placedCornerstones.some(c=>c.name===name))return;state.pendingCornerstone={name,icon};save();if(state.selectedHex!=null&&!cornerAt(state.selectedHex))commitCornerstone(state.selectedHex);else go('placeCornerstone')}
 function selectEmptyHex(i){state.selectedHex=i;save();render()}
 function beginCornerstoneFromHex(){go('cornerstonePick')}
-function placeCornerstone(){const pc=state.pendingCornerstone;return `<div class="settlement">${hud()}<div class="world"><div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),p=hexPos(h.q,h.r);return `<div class="hex ${c?'':'selectable'}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${c?'':`commitCornerstone(${h.id})`}">${c?c.icon:'＋'}</div>`}).join('')}</div><div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div></div><div class="toast">Tap an Inner Ring hex to place ${esc(pc?.name||'your Cornerstone')}.</div></div>`}
+function placeCornerstone(){const pc=state.pendingCornerstone||state.placedCornerstones.find(c=>c.name===state.movingCornerstone);return `<div class="settlement">${hud()}<div class="world"><div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),p=hexPos(h.q,h.r);return `<div class="hex ${c?'':'selectable'}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${c?'':`commitCornerstone(${h.id})`}">${c?c.icon:'＋'}</div>`}).join('')}</div><div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div></div><div class="toast">Tap an empty unlocked hex to ${state.movingCornerstone?'move':'place'} ${esc(pc?.name||'your Cornerstone')}.</div></div>`}
 function commitCornerstone(hex){
+  if(state.movingCornerstone){const moving=state.placedCornerstones.find(c=>c.name===state.movingCornerstone);if(!moving||cornerAt(hex))return;moving.hex=hex;state.placedCornerstone=moving;state.movingCornerstone=null;state.pendingCornerstone=null;state.selectedHex=null;save();go('home');return}
+  if(!state.pendingCornerstone||state.placedCornerstones.some(c=>c.name===state.pendingCornerstone.name))return;
   const c={...state.pendingCornerstone,hex};
   state.cornerstonePlaced=hex;state.placedCornerstone=c;state.placedCornerstones.push(c);
   state.pendingCornerstone=null;state.selectedHex=null;
@@ -444,6 +485,7 @@ function commitCornerstone(hex){
 }
 
 function openCornerstone(hex){state.selectedHex=hex;state.placedCornerstone=cornerAt(hex);save();go('cornerstoneLanding')}
+function moveCornerstone(){if(!state.placedCornerstone)return;state.movingCornerstone=state.placedCornerstone.name;state.pendingCornerstone=null;save();go('placeCornerstone')}
 
 function orderedSubs(chapterId){
   return state.subQuests.filter(s=>s.chapterId===chapterId).sort((a,b)=>(a.order??999)-(b.order??999));
@@ -471,7 +513,7 @@ function cornerstoneLanding(){
   const chapters=state.chapterQuests.filter(x=>x.cornerstone===c.name);
   return `<div class="screen"><div class="between"><h2>${c.icon} ${esc(c.name)}</h2><span>${state.constructionStage?'🏗️':''}</span></div>
     ${chapters.length?chapters.map(ch=>`<div class="card" onclick="openHierarchyDetail('chapter','${ch.id}')"><div class="between"><strong>${esc(ch.title)}</strong><span>${esc(ch.archetype)}</span></div><div class="progress"><div style="width:${ch.progress||0}%"></div></div><div class="sub small">${ch.progress||0}% complete</div>${renderSubTree(ch.id)}</div>`).join(''):'<div class="card sub">No Chapter Quests yet.</div>'}
-    <button class="btn primary" onclick="go('cornerstoneCreateMenu')">＋ Create Quest</button><button class="btn ghost" onclick="go('home')">Back</button></div>`;
+    <button class="btn primary" onclick="go('cornerstoneCreateMenu')">＋ Create Quest</button><button class="btn" onclick="moveCornerstone()">Move Cornerstone</button><button class="btn ghost" onclick="go('home')">Back</button></div>`;
 }
 const SUBQUEST_RARITIES=['Common','Uncommon','Rare','Epic','Legendary'];
 const SUBQUEST_RARITY_HELP={
@@ -489,10 +531,11 @@ function updateRarityHelp(selectId='subRarity',helpId='subRarityHelp'){
   const sel=document.getElementById(selectId),help=document.getElementById(helpId);if(!sel||!help)return;
   help.textContent=rarityHelperText(sel.value);
 }
+function subQuestProgress(subId){const qs=state.quests.filter(q=>q.parentSubQuestId===subId),done=qs.filter(q=>q.completed).length;return {done,total:qs.length,pct:qs.length?Math.round(done/qs.length*100):0}}
 function renderSubTree(chapterId){
-  const subs=state.subQuests.filter(s=>s.chapterId===chapterId);
+  const subs=orderedSubs(chapterId);
   if(!subs.length)return '';
-  return `<div class="tree-list">${subs.map(s=>`<div class="item subrow" draggable="true" ondragstart="subDragStart(event,'${s.id}')" ondragover="event.preventDefault()" ondrop="subDrop(event,'${s.id}')"><span class="drag-handle" title="Drag to reorder">≡</span><strong onclick="event.stopPropagation();openHierarchyDetail('sub','${s.id}')">${esc(s.title)}</strong><span class="badge" style="margin-left:7px">${esc(s.rarity||'Common')}</span>${state.quests.filter(q=>q.parentSubQuestId===s.id).map(q=>`<div class="sub small" onclick="event.stopPropagation();openHierarchyDetail('quest','${q.id}')">• ${esc(q.title)} · ${starDisplay(q.stars,q.earnedStars||0,q.completed)}</div>`).join('')}</div>`).join('')}</div>`;
+  return `<div class="tree-list">${subs.map(s=>{const p=subQuestProgress(s.id);return `<div class="item subrow" draggable="true" ondragstart="subDragStart(event,'${s.id}')" ondragover="event.preventDefault()" ondrop="subDrop(event,'${s.id}')"><span class="drag-handle" title="Drag to reorder">≡</span><div style="flex:1" onclick="event.stopPropagation();openHierarchyDetail('sub','${s.id}')"><div class="between"><strong>${esc(s.title)}</strong><span class="badge">${esc(s.rarity||'Common')}</span></div><div class="progress"><div style="width:${p.pct}%"></div></div><div class="sub small">${p.done}/${p.total} Active Quests complete</div></div></div>`}).join('')}</div>`;
 }
 function cornerstoneCreateMenu(){return `<div class="screen"><h2>Create in ${esc(state.placedCornerstone?.name||'Cornerstone')}</h2><div class="card"><button class="btn primary" onclick="go('createChapter')">＋ Chapter Quest</button><button class="btn" ${state.chapterQuests.length?'':'disabled'} onclick="state.subQuestDefaults=null;go('createSubQuest')">＋ Sub-Quest</button><button class="btn" ${state.subQuests.length?'':'disabled'} onclick="state.editorDefaults={questType:'Cornerstone Quest',cornerstone:state.placedCornerstone?.name||''};go('createQuest')">＋ Active Quest</button></div><button class="btn ghost" onclick="go('cornerstoneLanding')">Back</button></div>`}
 
@@ -509,7 +552,7 @@ function editChapterQuest(id){
     </div>
     <div class="field"><label>Title</label><input id="editChapterTitle" value="${esc(ch.title)}"></div>
     <div class="field"><label>Description</label><textarea id="editChapterDesc">${esc(ch.description||'')}</textarea></div>
-    <div class="sticky-actions">
+    ${q.kind==='tutorial'&&q.id==='t8'&&!state.requirements.focusSelected?`<button class="btn" onclick="go('focusChoose')">Choose Focus Quest</button>`:''}<div class="sticky-actions">
       <button class="btn primary" onclick="saveChapterQuest('${id}')">Save Changes</button>
       <button class="btn danger" onclick="deleteChapterQuest('${id}')">Delete Chapter Quest</button>
       <button class="btn ghost" onclick="openHierarchyDetail('chapter','${id}')">Cancel</button>
@@ -536,6 +579,7 @@ function deleteChapterQuest(id){
   state.quests=state.quests.filter(q=>!subIds.has(q.parentSubQuestId));
   state.subQuests=state.subQuests.filter(s=>s.chapterId!==id);
   state.chapterQuests=state.chapterQuests.filter(c=>c.id!==id);
+  if(state.focusChapterId===id){state.focusChapterId=null;state.requirements.focusSelected=false}
   save();go('cornerstoneLanding');
 }
 
@@ -564,7 +608,7 @@ function editSubQuest(id){
     <div class="field"><label>Rarity</label><select id="editSubRarity" onchange="updateRarityHelp('editSubRarity','editSubRarityHelp')">${rarityOptions(sub.rarity||'Common')}</select><div class="sub small" id="editSubRarityHelp" style="margin-top:6px">${esc(rarityHelperText(sub.rarity||'Common'))}</div></div>
     <div class="field"><label>Title</label><input id="editSubTitle" value="${esc(sub.title)}"></div>
     <div class="field"><label>Description (Optional)</label><textarea id="editSubDesc">${esc(sub.description||'')}</textarea></div>
-    <div class="sticky-actions">
+    ${q.kind==='tutorial'&&q.id==='t8'&&!state.requirements.focusSelected?`<button class="btn" onclick="go('focusChoose')">Choose Focus Quest</button>`:''}<div class="sticky-actions">
       <button class="btn primary" onclick="saveSubQuest('${id}')">Save Changes</button>
       <button class="btn danger" onclick="deleteSubQuest('${id}')">Delete Sub-Quest</button>
       <button class="btn ghost" onclick="openHierarchyDetail('sub','${id}')">Cancel</button>
@@ -598,6 +642,7 @@ function hierarchyBack(){
   if(r?.type&&r?.id){openHierarchyDetail(r.type,r.id);return}
   go(r?.screen||'cornerstoneLanding');
 }
+function activeQuestSort(a,b){if(!!a.completed!==!!b.completed)return a.completed?1:-1;if(a.completed&&b.completed)return new Date(a.completedAt||0)-new Date(b.completedAt||0);const ad=questDeadline(a),bd=questDeadline(b);if(ad&&bd)return ad-bd;if(ad)return -1;if(bd)return 1;return new Date(a.createdAt||0)-new Date(b.createdAt||0)}
 function subDropOnChapter(ev,targetId,chapterId){subDrop(ev,targetId);openHierarchyDetail('chapter',chapterId)}
 function openHierarchyDetail(type,id,returnType=null,returnId=null){
   if(returnType)state.hierarchyReturn={type:returnType,id:returnId};
@@ -607,14 +652,14 @@ function openHierarchyDetail(type,id,returnType=null,returnId=null){
   if(!obj)return;
   const chapter=type==='sub'?state.chapterQuests.find(c=>c.id===obj.chapterId):obj;
   const subs=type==='chapter'?orderedSubs(id):[];
-  const activeQuests=type==='sub'?state.quests.filter(q=>q.parentSubQuestId===id):[];
+  const activeQuests=type==='sub'?state.quests.filter(q=>q.parentSubQuestId===id).sort(activeQuestSort):[];
   const heading=type==='chapter'?`${esc(obj.title)} - ${esc(obj.archetype)}`:`${esc(obj.title)} - ${esc(obj.rarity||'Common')}`;
   app().innerHTML=`<div class="screen"><h2>${heading}</h2>
     <div class="row" style="align-items:stretch"><div class="detail-field" style="flex:1;margin-top:0"><b>Cornerstone</b>${esc(chapter?.cornerstone||'—')}</div><div class="detail-field" style="flex:1;margin-top:0"><b>Quest Type</b>${type==='chapter'?'Chapter Quest':'Sub-Quest'}</div></div>
     ${type==='sub'?`<div class="detail-field"><b>Chapter Quest</b>${esc(chapter?.title||'—')}</div>`:''}
     <div class="detail-field"><b>Description</b>${esc(obj.description||'—')}</div>
     ${type==='chapter'?`<div class="between" style="margin-top:18px"><h3 style="margin:0">Sub-Quests</h3><button class="btn" style="width:auto;margin:0" onclick="openCreateSubQuest('${id}')">＋ Sub-Quest</button></div>
-      <div style="margin-top:10px">${subs.length?subs.map(s=>`<div class="card subrow" draggable="true" ondragstart="subDragStart(event,'${s.id}')" ondragover="event.preventDefault()" ondrop="subDropOnChapter(event,'${s.id}','${id}')" onclick="openHierarchyDetail('sub','${s.id}','chapter','${id}')"><div class="between"><span><span class="drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">≡</span> <strong>${esc(s.title)}</strong></span><span class="badge">${esc(s.rarity||'Common')}</span></div></div>`).join(''):'<div class="card sub">No Sub-Quests yet.</div>'}</div>`:
+      <div style="margin-top:10px">${subs.length?subs.map(s=>`<div class="card" draggable="true" ondragstart="subDragStart(event,'${s.id}')" ondragover="event.preventDefault()" ondrop="subDropOnChapter(event,'${s.id}','${id}')" onclick="openHierarchyDetail('sub','${s.id}','chapter','${id}')"><div class="between"><span><span class="drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">≡</span> <strong>${esc(s.title)}</strong></span><span class="badge">${esc(s.rarity||'Common')}</span></div><div class="progress"><div style="width:${subQuestProgress(s.id).pct}%"></div></div><div class="sub small">${subQuestProgress(s.id).done}/${subQuestProgress(s.id).total} Active Quests complete</div></div>`).join(''):'<div class="card sub">No Sub-Quests yet.</div>'}</div>`:
       `<div class="between" style="margin-top:18px"><h3 style="margin:0">Active Quests</h3><button class="btn" style="width:auto;margin:0" onclick="openCreateActiveQuest('${id}')">＋ Active Quest</button></div>
       <div style="margin-top:10px">${activeQuests.length?activeQuests.map(q=>`<div class="card ${q.completed?'completed':''}" onclick="openHierarchyDetail('quest','${q.id}')"><div class="between"><strong>${esc(q.title)}</strong><span>${q.completed?'Completed':'Active'}</span></div><div class="sub small">Active Quest · ${starDisplay(q.stars,q.earnedStars||0,q.completed)}</div></div>`).join(''):'<div class="card sub">No Active Quests yet.</div>'}</div>`}
     <button class="btn" onclick="${type==='chapter'?`editChapterQuest('${id}')`:`editSubQuest('${id}')`}">Edit Quest</button>
@@ -684,7 +729,7 @@ function updateChapterProgress(subId){
 function menu(){return `<div class="screen"><h2>Menu</h2><div class="card"><button class="btn" onclick="go('home')">Return to Settlement</button><button class="btn ghost" onclick="if(confirm('Reset all prototype progress and start over?'))reset()">Reset Prototype / Start Over</button></div></div>`}
 
 function render(){
-  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,createMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,menu};
+  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,createMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,menu};
   app().innerHTML=(map[state.screen]||home)();
 }
 syncTutorial();
