@@ -552,7 +552,7 @@ function editChapterQuest(id){
     </div>
     <div class="field"><label>Title</label><input id="editChapterTitle" value="${esc(ch.title)}"></div>
     <div class="field"><label>Description</label><textarea id="editChapterDesc">${esc(ch.description||'')}</textarea></div>
-    ${q.kind==='tutorial'&&q.id==='t8'&&!state.requirements.focusSelected?`<button class="btn" onclick="go('focusChoose')">Choose Focus Quest</button>`:''}<div class="sticky-actions">
+    <div class="sticky-actions">
       <button class="btn primary" onclick="saveChapterQuest('${id}')">Save Changes</button>
       <button class="btn danger" onclick="deleteChapterQuest('${id}')">Delete Chapter Quest</button>
       <button class="btn ghost" onclick="openHierarchyDetail('chapter','${id}')">Cancel</button>
@@ -608,7 +608,7 @@ function editSubQuest(id){
     <div class="field"><label>Rarity</label><select id="editSubRarity" onchange="updateRarityHelp('editSubRarity','editSubRarityHelp')">${rarityOptions(sub.rarity||'Common')}</select><div class="sub small" id="editSubRarityHelp" style="margin-top:6px">${esc(rarityHelperText(sub.rarity||'Common'))}</div></div>
     <div class="field"><label>Title</label><input id="editSubTitle" value="${esc(sub.title)}"></div>
     <div class="field"><label>Description (Optional)</label><textarea id="editSubDesc">${esc(sub.description||'')}</textarea></div>
-    ${q.kind==='tutorial'&&q.id==='t8'&&!state.requirements.focusSelected?`<button class="btn" onclick="go('focusChoose')">Choose Focus Quest</button>`:''}<div class="sticky-actions">
+    <div class="sticky-actions">
       <button class="btn primary" onclick="saveSubQuest('${id}')">Save Changes</button>
       <button class="btn danger" onclick="deleteSubQuest('${id}')">Delete Sub-Quest</button>
       <button class="btn ghost" onclick="openHierarchyDetail('sub','${id}')">Cancel</button>
