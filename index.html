@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4O</title>
+<title>Life Quest Prototype v4P</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -93,6 +93,11 @@ textarea{min-height:86px}
 .quest-stars-mini{color:var(--muted);font-size:13px;margin-top:4px}
 .due-summary{color:var(--muted);font-size:13px;margin:10px 2px;cursor:pointer}
 .history-block{border-left:2px solid var(--line);padding-left:10px;margin-top:10px}
+
+.instance-tabs{display:flex;gap:8px;margin:12px 0}
+.instance-tab{flex:1;padding:9px 10px;border-radius:10px;border:1px solid var(--line);background:#151c24;color:var(--text);font-size:13px;font-weight:700}
+.instance-tab.active{background:var(--accent);color:#221700}
+.inline-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 </style>
 </head>
 <body>
@@ -134,6 +139,8 @@ if(state.placedCornerstone&&state.placedCornerstone.hex!=null&&!state.placedCorn
 state.helpSeen=Object.assign({chapter:false,rarity:false},state.helpSeen||{});
 state.chapterCollapsed=state.chapterCollapsed||{};
 state.questLogFolder=state.questLogFolder||null;
+state.questInstanceViewId=state.questInstanceViewId||null;
+state.extendQuestId=state.extendQuestId||null;
 state.screen=raw?'home':'character';
 
 function save(){localStorage.setItem(SAVE_KEY,JSON.stringify(state))}
@@ -259,8 +266,22 @@ function reopenQuest(id){
   const original=getQuest(id);if(!original||!original.completed)return;
   const root=questLineageRoot(original),current=cumulativeEarnedStars(root);
   if(current>=root.stars)return;
-  const q={...root,id:'q-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),completed:false,completedAt:null,earnedStars:current,createdAt:new Date().toISOString(),rootQuestId:root.id,reopenedFromId:original.id};
-  state.quests.push(q);save();state.currentQuest={kind:'quest',...q};state.detailReturn='questList';go('questDetail');
+  const q={...root,
+    id:'q-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
+    title:`${root.title} - Reopened`,
+    completed:false,
+    completedAt:null,
+    earnedStars:current,
+    createdAt:new Date().toISOString(),
+    rootQuestId:root.id,
+    reopenedFromId:original.id
+  };
+  state.quests.push(q);
+  state.questInstanceViewId=q.id;
+  save();
+  state.currentQuest={kind:'quest',...q};
+  state.detailReturn='questList';
+  go('questDetail');
 }
 function openQuestFolder(kind,id=null){state.questLogFolder={kind,id};save();render()}
 function folderBack(){
@@ -386,35 +407,89 @@ function home(){
 function openCharacterProfile(){const tq=getTutorial('t3b');if(tq&&!tq.completed)state.requirements.characterChecked=true;save();go('characterProfile')}
 function openQuestLog(){const tq=getTutorial('t3a');if(tq&&!tq.completed)state.requirements.questLogChecked=true;save();go('questList')}
 
+
+function isQuestOverdue(q){
+  if(!q||q.completed)return false;
+  const d=questDeadline(q);
+  return !!(d&&d<new Date());
+}
+function lineageInstances(q){
+  const root=questLineageRoot(q);if(!root)return [];
+  return state.quests.filter(x=>(x.rootQuestId||x.id)===root.id).sort((a,b)=>new Date(a.createdAt||0)-new Date(b.createdAt||0));
+}
+function logicalQuestLabel(q){
+  const root=questLineageRoot(q);if(!root)return q?.title||'Quest';
+  return lineageInstances(q).length>1?`${root.title} - Reopened`:root.title;
+}
+function openExtendTimeLimit(id){
+  const q=getQuest(id);if(!q)return;
+  state.extendQuestId=id;save();go('extendQuest');
+}
+function extendQuest(){
+  const q=getQuest(state.extendQuestId);if(!q)return home();
+  return `<div class="screen"><h2>Extend Time Limit</h2>
+    <div class="card"><strong>${esc(q.title)}</strong>
+      <div class="inline-grid">
+        <div class="field"><label>New Due Date</label><input id="extendDate" type="date" value="${esc(q.timeLimitDate||todayISO())}"></div>
+        <div class="field"><label>New Due Time (Optional)</label><input id="extendTime" type="time" value="${esc(q.timeLimitTime||'')}"></div>
+      </div>
+      <div class="sub small">Leave time blank for end of day.</div>
+    </div>
+    <button class="btn primary" onclick="saveExtendedQuest()">Save New Due Date</button>
+    <button class="btn ghost" onclick="state.extendQuestId=null;save();go('questDetail')">Back</button>
+  </div>`;
+}
+function saveExtendedQuest(){
+  const q=getQuest(state.extendQuestId);if(!q)return;
+  const d=document.getElementById('extendDate')?.value||'';
+  const tm=document.getElementById('extendTime')?.value||'';
+  if(!d){alert('Choose a new due date.');return}
+  q.timeLimitDate=d;q.timeLimitTime=tm;
+  state.extendQuestId=null;
+  state.currentQuest={kind:'quest',...q};
+  save();go('questDetail');
+}
+function setQuestInstance(id){
+  const q=getQuest(id);if(!q)return;
+  state.questInstanceViewId=id;
+  state.currentQuest={kind:'quest',...q};
+  save();render();
+}
+
 function questDetail(){
   const q=state.currentQuest;if(!q)return home();
   let canComplete=true;if(q.kind==='tutorial')canComplete=requirementSatisfied(q);
-  const h=q.parentSubQuestId?questHierarchyFor(q):{};
+  const instances=q.kind==='tutorial'?[]:lineageInstances(q);
+  const viewed=q.kind==='tutorial'?q:(instances.find(x=>x.id===state.questInstanceViewId)||q);
+  const h=viewed.parentSubQuestId?questHierarchyFor(viewed):{};
   const isCorner=!!h.chapter;
-  const cumulative=q.kind==='tutorial'?(q.earnedStars||0):cumulativeEarnedStars(q);
-  const starHTML=[1,2,3].map(n=>`<span class="star ${q.stars>=n?'gold':'empty'}">★</span>`).join('');
-  return `<div class="screen with-sticky quest-view"><h2>${esc(q.title)}</h2>
+  const cumulative=q.kind==='tutorial'?(q.earnedStars||0):cumulativeEarnedStars(viewed);
+  const starHTML=[1,2,3].map(n=>`<span class="star ${viewed.stars>=n?'gold':'empty'}">★</span>`).join('');
+  const isOverdue=q.kind!=='tutorial'&&isQuestOverdue(viewed);
+  const tabs=instances.length>1?`<div class="instance-tabs">${instances.map((x,i)=>`<button class="instance-tab ${x.id===viewed.id?'active':''}" onclick="setQuestInstance('${x.id}')">${i===0?'Original':`Reopened ${i}`}</button>`).join('')}</div>`:'';
+  return `<div class="screen with-sticky quest-view"><h2>${esc(logicalQuestLabel(viewed))}</h2>
+    ${tabs}
     <div class="form-grid">
-      <div class="field"><label>Quest Type</label><select disabled><option>${isCorner?'Active Quest':(q.type||'Tutorial Quest')}</option></select></div>
+      <div class="field"><label>Quest Type</label><select disabled><option>${isCorner?'Active Quest':(viewed.type||'Tutorial Quest')}</option></select></div>
       <div class="field"><label>Stars</label><div class="stars readonly">${starHTML}</div></div>
       ${isCorner?`<div class="field"><label>Cornerstone</label><select disabled><option>${esc(h.chapter.cornerstone)}</option></select></div>
       <div class="field"><label>Chapter Quest</label><select disabled><option>${esc(h.chapter.title)}</option></select></div>
       <div class="field"><label>Sub-Quest</label><select disabled><option>${esc(h.sub.title)}</option></select></div><div></div>`:''}
-      <div class="field full"><label>Title</label><input disabled value="${esc(q.title)}"></div>
-      <div class="field full"><label>Description</label><textarea disabled>${esc(q.description||'')}</textarea></div>
-      <div class="field"><label>Start Date</label><input disabled value="${esc(q.startDate||'—')}"></div>
-      <div class="field"><label>Start Time</label><input disabled value="${esc(q.startTime||'—')}"></div>
-      <div class="field"><label>Time Limit Date</label><input disabled value="${esc(q.timeLimitDate||'—')}"></div>
-      <div class="field"><label>Time Limit Time</label><input disabled value="${esc(q.timeLimitTime||'—')}"></div>
-      <div class="field"><label>Repeat</label><select disabled><option>${esc(q.repeat||'Never')}</option></select></div>
-      <div class="field"><label>Reminder</label><select disabled><option>${esc(q.reminder==='Custom'?(q.reminderDate?`${q.reminderDate}${q.reminderTime?' · '+q.reminderTime:' · End of day'}`:'Custom'):(q.reminder||'None'))}</option></select></div>
+      <div class="field full"><label>Title</label><input disabled value="${esc(viewed.title)}"></div>
+      <div class="field full"><label>Description</label><textarea disabled>${esc(viewed.description||'')}</textarea></div>
+      <div class="field"><label>Start Date</label><input disabled value="${esc(viewed.startDate||'—')}"></div>
+      <div class="field"><label>Start Time</label><input disabled value="${esc(viewed.startTime||'—')}"></div>
+      <div class="field"><label>Time Limit Date</label><input disabled value="${esc(viewed.timeLimitDate||'—')}"></div>
+      <div class="field"><label>Time Limit Time</label><input disabled value="${esc(viewed.timeLimitTime||'—')}"></div>
+      <div class="field"><label>Repeat</label><select disabled><option>${esc(viewed.repeat||'Never')}</option></select></div>
+      <div class="field"><label>Reminder</label><select disabled><option>${esc(viewed.reminder==='Custom'?(viewed.reminderDate?`${viewed.reminderDate}${viewed.reminderTime?' · '+viewed.reminderTime:' · End of day'}`:'Custom'):(viewed.reminder||'At due time'))}</option></select></div>
     </div>
     ${q.kind==='tutorial'&&q.id==='t8'&&!state.requirements.focusSelected?`<button class="btn" onclick="go('focusChoose')">Choose Focus Quest</button>`:''}
-    ${q.kind!=='tutorial'&&q.completed&&cumulative<q.stars?`<button class="btn" onclick="reopenQuest('${q.id}')">Reopen Quest</button>`:''}
-    ${q.kind!=='tutorial'&&questLineageHistory(q).length>1?`<div class="history-block"><div class="sub small">Quest History</div>${questLineageHistory(q).map((h,i)=>`<div class="sub small">${i===0?'Complete task':'Reopened to finish remaining work'} — earned ${'★'.repeat(h.earnedStars||0)}${'☆'.repeat(Math.max(0,(h.stars||0)-(h.earnedStars||0)))}</div>`).join('')}<div class="sub small">Total: ${'★'.repeat(cumulative)}${'☆'.repeat(Math.max(0,q.stars-cumulative))}</div></div>`:''}
+    ${q.kind!=='tutorial'&&viewed.completed&&cumulative<viewed.stars?`<button class="btn" onclick="reopenQuest('${viewed.id}')">Reopen Quest</button>`:''}
+    ${q.kind!=='tutorial'&&instances.length>1?`<div class="history-block"><div class="sub small">Quest History</div>${instances.map((h,i)=>`<div class="sub small">${i===0?'Complete task':'Reopened to finish remaining work'} — earned ${'★'.repeat(h.earnedStars||0)}${'☆'.repeat(Math.max(0,(h.stars||0)-(h.earnedStars||0)))}</div>`).join('')}<div class="sub small">Total: ${'★'.repeat(cumulative)}${'☆'.repeat(Math.max(0,viewed.stars-cumulative))}</div></div>`:''}
     <div class="sticky-actions">
-      <button class="btn primary" ${canComplete||q.completed?'':'disabled'} ${q.completed?'disabled':''} onclick="state.resolutionStars=${q.rootQuestId?'cumulativeEarnedStars(q)':'0'};go('resolve')">Complete Quest</button>
-      <button class="btn" ${q.kind==='tutorial'?'disabled':''} onclick="app().innerHTML=questEditor('edit','${q.id}')">Edit Quest</button>
+      <button class="btn primary" ${canComplete||viewed.completed?'':'disabled'} ${viewed.completed?'disabled':''} onclick="state.currentQuest={kind:'quest',...getQuest('${viewed.id}')};state.resolutionStars=${viewed.rootQuestId?`getQuest('${viewed.id}').earnedStars||0`:'0'};go('resolve')">Complete Quest</button>
+      <button class="btn" ${q.kind==='tutorial'?'disabled':''} onclick="app().innerHTML=questEditor('edit','${viewed.id}')">${isOverdue?'Extend Quest':'Edit Quest'}</button>
       <button class="btn ghost" onclick="go(state.detailReturn||'home')">Back</button>
     </div></div>`;
 }
@@ -430,13 +505,13 @@ function resolve(){
     <div class="field"><label>Notes (Optional)</label><textarea id="notes"></textarea></div>
   </div>
   <button class="btn primary" onclick="submitResolution()">Complete Quest</button>
-  <button class="btn" onclick="alert('Extend Time Limit is specified but not implemented in this prototype.')">Extend Time Limit</button>
+  <button class="btn" onclick="openExtendTimeLimit(state.currentQuest.id)">Extend Time Limit</button>
   <button class="btn ghost" onclick="alert('Cancel Quest is specified but not implemented in this prototype.')">Cancel Quest</button>
   <button class="btn ghost" onclick="go('questDetail')">Back</button></div>`;
 }
 function setResolution(n){const q=state.currentQuest;if(q?.kind==='quest'&&q.rootQuestId){const base=cumulativeEarnedStars(q);if(n<base)return}state.resolutionStars=state.resolutionStars===n?0:n;save();render()}
 function submitResolution(){
-  const q=state.currentQuest;const prior=(q.kind==='quest'&&q.rootQuestId)?cumulativeEarnedStars(q):0;const earned=Math.min(state.resolutionStars,q.stars);const rewardDelta=Math.max(0,earned-prior);
+  const q=state.currentQuest;const prior=(q.kind==='quest'&&q.rootQuestId)?(getQuest(q.id)?.earnedStars||0):0;const earned=Math.min(state.resolutionStars,q.stars);const rewardDelta=Math.max(0,earned-prior);
   if(q.kind==='tutorial'){
     completeTutorialFromSurvey(q.id,earned);
     if(q.id==='t1'&&!state.firstHomeReadyAt&&!state.firstHomeUpgraded)state.firstHomeReadyAt=Date.now()+5*60*1000;
@@ -529,11 +604,11 @@ function questList(){
     const freeVisible=free.filter(r=>{const latest=questLineageHistory(r).slice(-1)[0]||r;return filteredQuest(latest,filter)}).length;
     if(filter==='all'||freeVisible)body+=`<div class="card quest-card" onclick="openQuestFolder('free')"><strong>Free Quests</strong><div class="folder-meta">Active Quests: ${freeDone}/${free.length}</div><div class="folder-meta">★: ${freeEarned}/${freeMax}</div></div>`;
     orderedChapters(state.placedCornerstone?.name||'').forEach(()=>{});
-    state.chapterQuests.forEach(ch=>{const st=chapterQuestStats(ch.id,filter);if(filter!=='all'&&!st.visible)return;body+=`<div class="card quest-card" onclick="openQuestFolder('chapter','${ch.id}')"><strong>${esc(ch.title)}</strong><div class="folder-meta">Active Quests: ${st.completeCount}/${st.totalCount}</div><div class="folder-meta">★: ${st.earned}/${st.max}</div></div>`});
+    state.chapterQuests.forEach(ch=>{const st=chapterQuestStats(ch.id,filter);if(filter!=='all'&&!st.visible)return;body+=`<div class="card quest-card" onclick="openQuestFolder('chapter','${ch.id}')"><div class="between"><strong>${esc(ch.title)}</strong><span class="folder-meta">Active Quests: ${st.completeCount}/${st.totalCount}</span></div><div class="between"><span class="folder-meta">${esc(ch.cornerstone)}</span><span class="folder-meta">★: ${st.earned}/${st.max}</span></div></div>`});
   }else if(folder.kind==='free'){
     const roots=new Map();state.quests.filter(q=>!q.parentSubQuestId).forEach(q=>{const r=questLineageRoot(q);if(r)roots.set(r.id,r)});
     const qs=[...roots.values()].map(r=>questLineageHistory(r).slice(-1)[0]||r).filter(q=>filteredQuest(q,filter)).sort(activeQuestSort);
-    body=qs.length?qs.map(q=>`<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><strong>${esc(q.title)}</strong><div class="quest-stars-mini">${'★'.repeat(q.stars||0)}</div></div>`).join(''):'<div class="card sub">No Free Quests in this view.</div>';
+    body=qs.length?qs.map(q=>`<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><strong>${esc(logicalQuestLabel(q))}</strong><div class="quest-stars-mini">${'★'.repeat(cumulativeEarnedStars(q))}${'☆'.repeat(Math.max(0,(questLineageRoot(q)?.stars||q.stars||0)-cumulativeEarnedStars(q)))}</div></div>`).join(''):'<div class="card sub">No Free Quests in this view.</div>';
   }else if(folder.kind==='chapter'){
     const ch=state.chapterQuests.find(c=>c.id===folder.id),subs=orderedSubs(folder.id);
     body=`<h3>${esc(ch?.title||'Chapter Quest')}</h3>`+subs.filter(s=>filter==='all'||subQuestStats(s.id,filter).visible).map(s=>{const st=subQuestStats(s.id,filter);return `<div class="card quest-card" onclick="openQuestFolder('sub','${s.id}')"><strong>${esc(s.title)}</strong><div class="folder-meta">Active Quests: ${st.completeCount}/${st.totalCount}</div><div class="folder-meta">★: ${st.earned}/${st.max}</div></div>`}).join('');
@@ -541,7 +616,7 @@ function questList(){
   }else if(folder.kind==='sub'){
     const sub=state.subQuests.find(x=>x.id===folder.id),roots=new Map();state.quests.filter(q=>q.parentSubQuestId===folder.id).forEach(q=>{const r=questLineageRoot(q);if(r)roots.set(r.id,r)});
     const qs=[...roots.values()].map(r=>questLineageHistory(r).slice(-1)[0]||r).filter(q=>filteredQuest(q,filter)).sort(activeQuestSort);
-    body=`<h3>${esc(sub?.title||'Sub-Quest')}</h3>`+(qs.length?qs.map(q=>`<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><strong>${esc(q.title)}</strong><div class="quest-stars-mini">${'★'.repeat(q.stars||0)}</div></div>`).join(''):'<div class="card sub">No Active Quests in this view.</div>');
+    body=`<h3>${esc(sub?.title||'Sub-Quest')}</h3>`+(qs.length?qs.map(q=>`<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><strong>${esc(logicalQuestLabel(q))}</strong><div class="quest-stars-mini">${'★'.repeat(cumulativeEarnedStars(q))}${'☆'.repeat(Math.max(0,(questLineageRoot(q)?.stars||q.stars||0)-cumulativeEarnedStars(q)))}</div></div>`).join(''):'<div class="card sub">No Active Quests in this view.</div>');
   }
   return `<div class="screen with-sticky"><h2>Quests</h2><div class="tabs"><button class="tab ${filter==='all'?'active':''}" onclick="setQuestTab('all')">All</button><button class="tab ${filter==='active'?'active':''}" onclick="setQuestTab('active')">Active</button><button class="tab ${filter==='completed'?'active':''}" onclick="setQuestTab('completed')">Completed</button></div><div id="questCards">${body}</div><div class="sticky-actions two"><button class="btn primary" onclick="state.editorDefaults={questType:'Free Quest'};go('createQuest')">＋ Create Quest</button><button class="btn ghost" onclick="folderBack()">Back</button></div></div>`;
 }
@@ -568,7 +643,13 @@ function cornerstonePick(){const placed=new Set(state.placedCornerstones.map(c=>
 function chooseCornerstone(name,icon){if(state.placedCornerstones.some(c=>c.name===name))return;state.pendingCornerstone={name,icon};save();if(state.selectedHex!=null&&!cornerAt(state.selectedHex))commitCornerstone(state.selectedHex);else go('placeCornerstone')}
 function selectEmptyHex(i){state.selectedHex=i;save();render()}
 function beginCornerstoneFromHex(){go('cornerstonePick')}
-function placeCornerstone(){const pc=state.pendingCornerstone||state.placedCornerstones.find(c=>c.name===state.movingCornerstone);return `<div class="settlement">${hud()}<div class="world"><div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),p=hexPos(h.q,h.r);return `<div class="hex ${c?'':'selectable'}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${c?'':`commitCornerstone(${h.id})`}">${c?c.icon:'＋'}</div>`}).join('')}</div><div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div></div><div class="toast">Tap an empty unlocked hex to ${state.movingCornerstone?'move':'place'} ${esc(pc?.name||'your Cornerstone')}.</div></div>`}
+function placeCornerstone(){
+  const pc=state.pendingCornerstone||state.placedCornerstones.find(c=>c.name===state.movingCornerstone);
+  const currentHex=state.movingCornerstone?state.placedCornerstones.find(c=>c.name===state.movingCornerstone)?.hex:null;
+  return `<div class="settlement">${hud()}<div class="world"><div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),p=hexPos(h.q,h.r),isCurrent=state.movingCornerstone&&h.id===currentHex;return `<div class="hex ${(!c||isCurrent)?'selectable':''}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${isCurrent?'cancelCornerstoneMove()':(c?'':`commitCornerstone(${h.id})`)}">${c?c.icon:'＋'}</div>`}).join('')}</div><div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div></div><div class="toast">Tap an empty unlocked hex to ${state.movingCornerstone?'move':'place'} ${esc(pc?.name||'your Cornerstone')}.</div>${state.movingCornerstone?`<div class="hex-action" style="top:auto;bottom:92px"><button class="btn ghost" onclick="cancelCornerstoneMove()">Back / Cancel Move</button></div>`:''}</div>`;
+}
+function cancelCornerstoneMove(){state.movingCornerstone=null;state.pendingCornerstone=null;save();go('cornerstoneLanding')}
+
 function commitCornerstone(hex){
   if(state.movingCornerstone){const moving=state.placedCornerstones.find(c=>c.name===state.movingCornerstone);if(!moving||cornerAt(hex))return;moving.hex=hex;state.placedCornerstone=moving;state.movingCornerstone=null;state.pendingCornerstone=null;state.selectedHex=null;save();go('home');return}
   if(!state.pendingCornerstone||state.placedCornerstones.some(c=>c.name===state.pendingCornerstone.name))return;
@@ -833,7 +914,7 @@ function updateChapterProgress(subId){
 function menu(){return `<div class="screen"><h2>Menu</h2><div class="card"><button class="btn" onclick="go('home')">Return to Settlement</button><button class="btn ghost" onclick="if(confirm('Reset all prototype progress and start over?'))reset()">Reset Prototype / Start Over</button></div></div>`}
 
 function render(){
-  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,createMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,menu};
+  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,createMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,extendQuest,menu};
   app().innerHTML=(map[state.screen]||home)();
 }
 syncTutorial();
