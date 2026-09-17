@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4Q</title>
+<title>Life Quest Prototype v4Q Fixed</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -128,7 +128,13 @@ const DEFAULT={
 };
 
 const raw=localStorage.getItem(SAVE_KEY);
-let state=raw?Object.assign({},DEFAULT,JSON.parse(raw)):{...DEFAULT};
+let state;
+try{
+  state=raw?Object.assign({},DEFAULT,JSON.parse(raw)):JSON.parse(JSON.stringify(DEFAULT));
+}catch(err){
+  console.warn('Life Quest save could not be loaded; starting from defaults.',err);
+  state=JSON.parse(JSON.stringify(DEFAULT));
+}
 state.quests=Array.isArray(state.quests)?state.quests:[];
 state.tutorialQuests=Array.isArray(state.tutorialQuests)?state.tutorialQuests:[];
 state.chapterQuests=Array.isArray(state.chapterQuests)?state.chapterQuests:[];
@@ -393,7 +399,6 @@ function focusChoose(){
 }
 
 function home(){
-  syncTutorial();
   let toast='';
   if(state.firstHomeReadyAt&&Date.now()>=state.firstHomeReadyAt&&!state.firstHomeUpgraded){state.firstHomeUpgraded=true;save();toast='<div class="toast">🏠 Your central home is complete.</div>'}
   if(state.constructionReadyAt&&Date.now()>=state.constructionReadyAt&&state.constructionStage===0){state.constructionStage=1;save();toast='<div class="toast">🏗️ Stage 1 construction has begun.</div>'}
@@ -642,7 +647,6 @@ function saveQuestEditor(mode,id){
   go(type==='Cornerstone Quest'?'cornerstoneLanding':'home');
 }
 function questList(){
-  syncTutorial();
   const filter=state.questTab||'all',folder=state.questLogFolder;let body='';
   if(!folder){
     const freeRoots=new Map();state.quests.filter(q=>!q.parentSubQuestId).forEach(q=>{const r=questLineageRoot(q);if(r)freeRoots.set(r.id,r)});
@@ -783,7 +787,7 @@ function editChapterQuest(id){
     </div>
     <div class="field"><label>Title</label><input id="editChapterTitle" value="${esc(ch.title)}"></div>
     <div class="field"><label>Description</label><textarea id="editChapterDesc">${esc(ch.description||'')}</textarea></div>
-    ${q.kind==='tutorial'&&q.id==='t8'&&!state.requirements.focusSelected?`<button class="btn" onclick="go('focusChoose')">Choose Focus Quest</button>`:''}<div class="sticky-actions">
+    <div class="sticky-actions">
       <button class="btn primary" onclick="saveChapterQuest('${id}')">Save Changes</button>
       <button class="btn danger" onclick="deleteChapterQuest('${id}')">Delete Chapter Quest</button>
       <button class="btn ghost" onclick="openHierarchyDetail('chapter','${id}')">Cancel</button>
@@ -839,7 +843,7 @@ function editSubQuest(id){
     <div class="field"><label>Rarity</label><select id="editSubRarity" onchange="updateRarityHelp('editSubRarity','editSubRarityHelp')">${rarityOptions(sub.rarity||'Common')}</select><div class="sub small" id="editSubRarityHelp" style="margin-top:6px">${esc(rarityHelperText(sub.rarity||'Common'))}</div></div>
     <div class="field"><label>Title</label><input id="editSubTitle" value="${esc(sub.title)}"></div>
     <div class="field"><label>Description (Optional)</label><textarea id="editSubDesc">${esc(sub.description||'')}</textarea></div>
-    ${q.kind==='tutorial'&&q.id==='t8'&&!state.requirements.focusSelected?`<button class="btn" onclick="go('focusChoose')">Choose Focus Quest</button>`:''}<div class="sticky-actions">
+    <div class="sticky-actions">
       <button class="btn primary" onclick="saveSubQuest('${id}')">Save Changes</button>
       <button class="btn danger" onclick="deleteSubQuest('${id}')">Delete Sub-Quest</button>
       <button class="btn ghost" onclick="openHierarchyDetail('sub','${id}')">Cancel</button>
@@ -963,8 +967,16 @@ function render(){
   const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,createMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,extendQuest,menu};
   app().innerHTML=(map[state.screen]||home)();
 }
-syncTutorial();
-render();
+window.addEventListener('error',e=>{
+  const root=document.getElementById('app');
+  if(root&&!root.innerHTML.trim()){
+    root.innerHTML=`<div class="screen"><h2>Life Quest couldn't start</h2><div class="card"><div class="sub small">${esc(e.message||'Unknown startup error')}</div></div><button class="btn" onclick="localStorage.removeItem(SAVE_KEY);location.reload()">Reset local prototype data</button></div>`;
+  }
+});
+try{render()}catch(e){
+  console.error(e);
+  app().innerHTML=`<div class="screen"><h2>Life Quest couldn't start</h2><div class="card"><div class="sub small">${esc(e.message||'Unknown startup error')}</div></div><button class="btn" onclick="localStorage.removeItem(SAVE_KEY);location.reload()">Reset local prototype data</button></div>`;
+}
 </script>
 </body>
 </html>
