@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4P</title>
+<title>Life Quest Prototype v4Q</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -141,7 +141,19 @@ state.chapterCollapsed=state.chapterCollapsed||{};
 state.questLogFolder=state.questLogFolder||null;
 state.questInstanceViewId=state.questInstanceViewId||null;
 state.extendQuestId=state.extendQuestId||null;
-state.screen=raw?'home':'character';
+state.screen='home';
+// v4Q testing build: bypass onboarding while preserving tutorial code.
+if(!state.character)state.character={name:'Player',look:'Adventurer'};
+state.xp=Math.max(state.xp||0,60);
+state.level=Math.max(state.level||1,5);
+state.cornerstoneUnlocked=true;state.innerRingUnlocked=true;state.outerRingUnlocked=true;
+state.requirements=Object.assign({},state.requirements,{
+  freeQuestCreated:true,freeQuestCompleted:true,questLogChecked:true,characterChecked:true,
+  cornerstonePlaced:true,chapterCreated:true,subQuestCreated:true,childQuestCreated:true,
+  childQuestCompleted:true,focusSelected:true
+});
+state.tutorialQuests.forEach(q=>{q.completed=true});
+save();
 
 function save(){localStorage.setItem(SAVE_KEY,JSON.stringify(state))}
 function go(screen){state.screen=screen;save();render()}
@@ -291,10 +303,7 @@ function folderBack(){
   state.questLogFolder=null;save();render();
 }
 
-function currentTutorial(){
-  syncTutorial();
-  return state.tutorialQuests.find(q=>!q.completed);
-}
+function currentTutorial(){return null}
 
 function character(){
   return `<div class="screen">
@@ -555,10 +564,10 @@ let createStars=1;
 function questEditor(mode='create', questId=null, defaults={}){
   const q=questId?getQuest(questId):null;
   const h=q?questHierarchyFor(q):{};
-  const type=q?(q.parentSubQuestId?'Cornerstone Quest':'Free Quest'):(defaults.questType||'Free Quest');
-  const corner=q?(h.cornerstone||''):(defaults.cornerstone||state.placedCornerstone?.name||'');
-  const chapter=q?(h.chapter?.id||''):(defaults.chapterId||'');
-  const sub=q?(h.sub?.id||''):(defaults.subQuestId||'');
+  const type=defaults.questType||(q?(q.parentSubQuestId?'Cornerstone Quest':'Free Quest'):'Free Quest');
+  const corner=(defaults.cornerstone!==undefined?defaults.cornerstone:(q?(h.cornerstone||''):(state.placedCornerstone?.name||'')));
+  const chapter=(defaults.chapterId!==undefined?defaults.chapterId:(q?(h.chapter?.id||''):''));
+  const sub=(defaults.subQuestId!==undefined?defaults.subQuestId:(q?(h.sub?.id||''):''));
   createStars=q?.stars||1;
   const corners=cornerstoneOptions(), chs=corner?chaptersForCornerstone(corner):[], subs=chapter?subsForChapter(chapter):[];
   return `<div class="screen with-sticky"><h2>${mode==='edit'?'Edit Quest':(type==='Cornerstone Quest'?'New Active Quest':'New Quest')}</h2><div class="form-grid">
@@ -585,16 +594,53 @@ function refreshQuestEditor(mode,id,cornerChanged=false,chapterChanged=false){
   const prior=state.editorDefaults||{};const defaults={questType:type,cornerstone:corner,chapterId:cornerChanged?'':chapter,subQuestId:(cornerChanged||chapterChanged)?'':sub,title:document.getElementById('qeTitle')?.value||'',lockHierarchy:!!prior.lockHierarchy,returnType:prior.returnType,returnId:prior.returnId};state.editorDefaults=defaults;save();app().innerHTML=questEditor(mode,id,defaults)
 }
 function saveQuestEditor(mode,id){
-  const title=document.getElementById('qeTitle').value.trim(), endDate=document.getElementById('qeEndDate').value;if(!title||!endDate){alert('Title and Time Limit Date are required.');return}
-  const type=document.getElementById('qeType').value, sub=type==='Cornerstone Quest'?(document.getElementById('qeSub')?.value||''):'';if(type==='Cornerstone Quest'&&!sub){alert('Choose a Sub-Quest for this Active Quest.');return}
-  const reminder=document.getElementById('qeReminder').value,reminderDate=document.getElementById('qeReminderDate')?.value||'',reminderTime=document.getElementById('qeReminderTime')?.value||'';if(reminder==='Custom'&&!reminderDate){alert('Choose a Reminder Date for a custom reminder.');return}
-  const base={type:type==='Free Quest'?'Free Quest':'Quest',title,description:document.getElementById('qeDesc').value.trim(),stars:createStars,startDate:document.getElementById('qeStartDate').value,startTime:document.getElementById('qeStartTime').value,timeLimitDate:endDate,timeLimitTime:document.getElementById('qeEndTime').value,repeat:document.getElementById('qeRepeat').value,reminder,reminderDate:reminder==='Custom'?reminderDate:'',reminderTime:reminder==='Custom'?reminderTime:'',parentSubQuestId:type==='Cornerstone Quest'?sub:null};
-  if(mode==='edit'){const q=getQuest(id);if(!q)return;Object.assign(q,base);save();state.currentQuest={kind:'quest',...q};go('questDetail');return}
-  const t2=getTutorial('t2'),isTutorialFree=type==='Free Quest'&&!!t2&&!t2.completed&&!state.requirements.freeQuestCreated;if(isTutorialFree&&createStars!==1){alert('For this tutorial, create a 1-star Free Quest.');return}
-  const q={id:'q-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),...base,completed:false,earnedStars:0,createdAt:new Date().toISOString(),tutorialFree:isTutorialFree};state.quests.push(q);if(isTutorialFree)state.requirements.freeQuestCreated=true;if(type==='Cornerstone Quest'&&!state.requirements.childQuestCreated)state.requirements.childQuestCreated=true;const d=state.editorDefaults||{};state.editorDefaults={};syncTutorial();save();if(d.returnType&&d.returnId){openHierarchyDetail(d.returnType,d.returnId);return}go(type==='Cornerstone Quest'?'cornerstoneLanding':'home')
+  const title=document.getElementById('qeTitle').value.trim();
+  const endDate=document.getElementById('qeEndDate').value;
+  if(!title||!endDate){alert('Title and Time Limit Date are required.');return}
+  const type=document.getElementById('qeType').value;
+  const sub=type==='Cornerstone Quest'?(document.getElementById('qeSub')?.value||''):'';
+  if(type==='Cornerstone Quest'&&!sub){alert('Choose a Sub-Quest for this Active Quest.');return}
+  const reminder=document.getElementById('qeReminder').value;
+  const reminderDate=document.getElementById('qeReminderDate')?.value||'';
+  const reminderTime=document.getElementById('qeReminderTime')?.value||'';
+  if(reminder==='Custom'&&!reminderDate){alert('Choose a Reminder Date for a custom reminder.');return}
+  const base={
+    type:type==='Free Quest'?'Free Quest':'Quest',
+    title,
+    description:document.getElementById('qeDesc').value.trim(),
+    stars:createStars,
+    startDate:document.getElementById('qeStartDate').value,
+    startTime:document.getElementById('qeStartTime').value,
+    timeLimitDate:endDate,
+    timeLimitTime:document.getElementById('qeEndTime').value,
+    repeat:document.getElementById('qeRepeat').value,
+    reminder,
+    reminderDate:reminder==='Custom'?reminderDate:'',
+    reminderTime:reminder==='Custom'?reminderTime:'',
+    parentSubQuestId:type==='Cornerstone Quest'?sub:null
+  };
+  if(mode==='edit'){
+    const q=getQuest(id);if(!q)return;
+    Object.assign(q,base);
+    const root=questLineageRoot(q);
+    state.quests.filter(x=>(x.rootQuestId||x.id)===root.id).forEach(x=>{
+      x.parentSubQuestId=base.parentSubQuestId;
+      x.type=base.type;
+    });
+    save();state.currentQuest={kind:'quest',...q};go('questDetail');return;
+  }
+  const t2=getTutorial('t2');
+  const isTutorialFree=type==='Free Quest'&&!!t2&&!t2.completed&&!state.requirements.freeQuestCreated;
+  if(isTutorialFree&&createStars!==1){alert('For this tutorial, create a 1-star Free Quest.');return}
+  const q={id:'q-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),...base,completed:false,earnedStars:0,createdAt:new Date().toISOString(),tutorialFree:isTutorialFree};
+  state.quests.push(q);
+  if(isTutorialFree)state.requirements.freeQuestCreated=true;
+  if(type==='Cornerstone Quest'&&!state.requirements.childQuestCreated)state.requirements.childQuestCreated=true;
+  const d=state.editorDefaults||{};state.editorDefaults={};
+  syncTutorial();save();
+  if(d.returnType&&d.returnId){openHierarchyDetail(d.returnType,d.returnId);return}
+  go(type==='Cornerstone Quest'?'cornerstoneLanding':'home');
 }
-function deleteQuest(id){const q=getQuest(id);if(!q)return;if(!confirm(`Delete "${q.title}"?\n\nDeleting this Quest will permanently remove it and its history. This cannot be undone.`))return;state.quests=state.quests.filter(x=>x.id!==id);state.currentQuest=null;save();go('questList')}
-function createQuest(){return questEditor('create',null,state.editorDefaults||{})}
 function questList(){
   syncTutorial();
   const filter=state.questTab||'all',folder=state.questLogFolder;let body='';
@@ -646,7 +692,7 @@ function beginCornerstoneFromHex(){go('cornerstonePick')}
 function placeCornerstone(){
   const pc=state.pendingCornerstone||state.placedCornerstones.find(c=>c.name===state.movingCornerstone);
   const currentHex=state.movingCornerstone?state.placedCornerstones.find(c=>c.name===state.movingCornerstone)?.hex:null;
-  return `<div class="settlement">${hud()}<div class="world"><div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),p=hexPos(h.q,h.r),isCurrent=state.movingCornerstone&&h.id===currentHex;return `<div class="hex ${(!c||isCurrent)?'selectable':''}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${isCurrent?'cancelCornerstoneMove()':(c?'':`commitCornerstone(${h.id})`)}">${c?c.icon:'＋'}</div>`}).join('')}</div><div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div></div><div class="toast">Tap an empty unlocked hex to ${state.movingCornerstone?'move':'place'} ${esc(pc?.name||'your Cornerstone')}.</div>${state.movingCornerstone?`<div class="hex-action" style="top:auto;bottom:92px"><button class="btn ghost" onclick="cancelCornerstoneMove()">Back / Cancel Move</button></div>`:''}</div>`;
+  return `<div class="settlement">${hud()}<div class="world"><div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),p=hexPos(h.q,h.r),isCurrent=state.movingCornerstone&&h.id===currentHex;return `<div class="hex ${(!c||isCurrent)?'selectable':''}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${isCurrent?'cancelCornerstoneMove()':(c?'':`commitCornerstone(${h.id})`)}">${c?c.icon:'＋'}</div>`}).join('')}</div><div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div></div><div class="toast">Tap an empty unlocked hex to ${state.movingCornerstone?'move':'place'} ${esc(pc?.name||'your Cornerstone')}.</div>${state.movingCornerstone?`<div class="hex-action" style="top:auto;bottom:154px"><button class="btn ghost" onclick="cancelCornerstoneMove()">Back / Cancel Move</button></div>`:''}</div>`;
 }
 function cancelCornerstoneMove(){state.movingCornerstone=null;state.pendingCornerstone=null;save();go('cornerstoneLanding')}
 
