@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4Q Fixed</title>
+<title>Life Quest Prototype v4Q Fixed 2</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -128,13 +128,7 @@ const DEFAULT={
 };
 
 const raw=localStorage.getItem(SAVE_KEY);
-let state;
-try{
-  state=raw?Object.assign({},DEFAULT,JSON.parse(raw)):JSON.parse(JSON.stringify(DEFAULT));
-}catch(err){
-  console.warn('Life Quest save could not be loaded; starting from defaults.',err);
-  state=JSON.parse(JSON.stringify(DEFAULT));
-}
+let state=raw?Object.assign({},DEFAULT,JSON.parse(raw)):{...DEFAULT};
 state.quests=Array.isArray(state.quests)?state.quests:[];
 state.tutorialQuests=Array.isArray(state.tutorialQuests)?state.tutorialQuests:[];
 state.chapterQuests=Array.isArray(state.chapterQuests)?state.chapterQuests:[];
@@ -399,6 +393,7 @@ function focusChoose(){
 }
 
 function home(){
+  syncTutorial();
   let toast='';
   if(state.firstHomeReadyAt&&Date.now()>=state.firstHomeReadyAt&&!state.firstHomeUpgraded){state.firstHomeUpgraded=true;save();toast='<div class="toast">🏠 Your central home is complete.</div>'}
   if(state.constructionReadyAt&&Date.now()>=state.constructionReadyAt&&state.constructionStage===0){state.constructionStage=1;save();toast='<div class="toast">🏗️ Stage 1 construction has begun.</div>'}
@@ -561,6 +556,10 @@ function openCreateActiveQuest(subId){
   const sub=state.subQuests.find(s=>s.id===subId);const ch=sub&&state.chapterQuests.find(c=>c.id===sub.chapterId);if(!sub||!ch)return;
   state.editorDefaults={questType:'Cornerstone Quest',cornerstone:ch.cornerstone,chapterId:ch.id,subQuestId:sub.id,lockHierarchy:true,returnType:'sub',returnId:sub.id};save();go('createQuest');
 }
+function createQuest(){
+  const d=state.editorDefaults||{};
+  return questEditor('create',null,d);
+}
 function cancelQuestEditorCreate(){
   const d=state.editorDefaults||{};state.editorDefaults={};save();
   if(d.returnType&&d.returnId){openHierarchyDetail(d.returnType,d.returnId);return}go('createMenu');
@@ -647,6 +646,7 @@ function saveQuestEditor(mode,id){
   go(type==='Cornerstone Quest'?'cornerstoneLanding':'home');
 }
 function questList(){
+  syncTutorial();
   const filter=state.questTab||'all',folder=state.questLogFolder;let body='';
   if(!folder){
     const freeRoots=new Map();state.quests.filter(q=>!q.parentSubQuestId).forEach(q=>{const r=questLineageRoot(q);if(r)freeRoots.set(r.id,r)});
@@ -967,16 +967,8 @@ function render(){
   const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,createMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,extendQuest,menu};
   app().innerHTML=(map[state.screen]||home)();
 }
-window.addEventListener('error',e=>{
-  const root=document.getElementById('app');
-  if(root&&!root.innerHTML.trim()){
-    root.innerHTML=`<div class="screen"><h2>Life Quest couldn't start</h2><div class="card"><div class="sub small">${esc(e.message||'Unknown startup error')}</div></div><button class="btn" onclick="localStorage.removeItem(SAVE_KEY);location.reload()">Reset local prototype data</button></div>`;
-  }
-});
-try{render()}catch(e){
-  console.error(e);
-  app().innerHTML=`<div class="screen"><h2>Life Quest couldn't start</h2><div class="card"><div class="sub small">${esc(e.message||'Unknown startup error')}</div></div><button class="btn" onclick="localStorage.removeItem(SAVE_KEY);location.reload()">Reset local prototype data</button></div>`;
-}
+syncTutorial();
+render();
 </script>
 </body>
 </html>
