@@ -154,6 +154,31 @@ state.extendQuestId=state.extendQuestId||null;
     seenQuestIds.add(q.id);
   });
 }
+// Repair recurring-series collisions as well as Quest-ID collisions.
+// Earlier builds could give two different recurring Quests the same id; because seriesId
+// was copied from that id, repairing only q.id still left unrelated Daily Quests grouped together.
+{
+  const groups=new Map();
+  state.quests.filter(q=>q&&q.repeat&&q.repeat!=='Never').forEach(q=>{
+    const sid=q.seriesId||q.id;
+    if(!groups.has(sid))groups.set(sid,[]);
+    groups.get(sid).push(q);
+  });
+  groups.forEach((items,sid)=>{
+    const buckets=new Map();
+    items.forEach(q=>{
+      const key=[q.title||'',q.parentSubQuestId||'',q.repeat||'',JSON.stringify(q.repeatDays||[])].join('||');
+      if(!buckets.has(key))buckets.set(key,[]);
+      buckets.get(key).push(q);
+    });
+    if(buckets.size<=1)return;
+    let n=0;
+    buckets.forEach(bucket=>{
+      const newSid=`${sid}-series-repair-${n++}-${Math.random().toString(36).slice(2,7)}`;
+      bucket.forEach(q=>q.seriesId=newSid);
+    });
+  });
+}
 state.screen='home';
 // v4Q testing build: bypass onboarding while preserving tutorial code.
 if(!state.character)state.character={name:'Player',look:'Adventurer'};
