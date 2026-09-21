@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4R Fixed 2</title>
+<title>Life Quest Prototype v4R Daily Routing Fix</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -142,6 +142,18 @@ state.chapterCollapsed=state.chapterCollapsed||{};
 state.questLogFolder=state.questLogFolder||null;
 state.questInstanceViewId=state.questInstanceViewId||null;
 state.extendQuestId=state.extendQuestId||null;
+// Repair duplicate Quest IDs created by early recurring-occurrence generation.
+// Duplicate IDs make getQuest(id) return the wrong occurrence/series when a Daily item is opened.
+{
+  const seenQuestIds=new Set();
+  state.quests.forEach((q,i)=>{
+    if(!q?.id)return;
+    if(seenQuestIds.has(q.id)){
+      q.id=`${q.id}-repair-${i}-${Math.random().toString(36).slice(2,7)}`;
+    }
+    seenQuestIds.add(q.id);
+  });
+}
 state.screen='home';
 // v4Q testing build: bypass onboarding while preserving tutorial code.
 if(!state.character)state.character={name:'Player',look:'Adventurer'};
@@ -395,7 +407,7 @@ function scheduledOnDate(q,dateISO){
 function ensureRecurringOccurrences(){
   const today=todayISO();const templates=new Map();
   state.quests.filter(isRecurring).forEach(q=>{const sid=q.seriesId||q.id;q.seriesId=sid;if(!q.seriesStartDate)q.seriesStartDate=q.startDate||q.timeLimitDate||today;if(!q.occurrenceDate)q.occurrenceDate=q.timeLimitDate||q.startDate||today;if(!templates.has(sid)||q.occurrenceDate<templates.get(sid).occurrenceDate)templates.set(sid,q)});
-  templates.forEach((t,sid)=>{let d=new Date(t.seriesStartDate+'T12:00:00'),last=new Date(today+'T12:00:00');for(let guard=0;d<=last&&guard<730;guard++,d.setDate(d.getDate()+1)){const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;if(!scheduledOnDate(t,iso))continue;if(state.quests.some(q=>q.seriesId===sid&&q.occurrenceDate===iso))continue;state.quests.push({...t,id:'q-'+Date.now()+'-'+guard,rootQuestId:null,completed:false,earnedStars:0,completedAt:null,occurrenceDate:iso,startDate:iso,timeLimitDate:iso,seriesId:sid});}}
+  templates.forEach((t,sid)=>{let d=new Date(t.seriesStartDate+'T12:00:00'),last=new Date(today+'T12:00:00');for(let guard=0;d<=last&&guard<730;guard++,d.setDate(d.getDate()+1)){const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;if(!scheduledOnDate(t,iso))continue;if(state.quests.some(q=>q.seriesId===sid&&q.occurrenceDate===iso))continue;state.quests.push({...t,id:'q-'+Date.now()+'-'+guard+'-'+Math.random().toString(36).slice(2,7),rootQuestId:null,completed:false,earnedStars:0,completedAt:null,occurrenceDate:iso,startDate:iso,timeLimitDate:iso,seriesId:sid});}}
   );save();
 }
 function recurringSeries(){ensureRecurringOccurrences();const m=new Map();state.quests.filter(isRecurring).forEach(q=>{const sid=q.seriesId||q.id;if(!m.has(sid))m.set(sid,[]);m.get(sid).push(q)});return m}
