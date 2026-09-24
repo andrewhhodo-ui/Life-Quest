@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4R Daily Routing Fix</title>
+<title>Life Quest Prototype v4S</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -140,45 +140,9 @@ if(state.placedCornerstone&&state.placedCornerstone.hex!=null&&!state.placedCorn
 state.helpSeen=Object.assign({chapter:false,rarity:false},state.helpSeen||{});
 state.chapterCollapsed=state.chapterCollapsed||{};
 state.questLogFolder=state.questLogFolder||null;
+state.questSearch=state.questSearch||'';
 state.questInstanceViewId=state.questInstanceViewId||null;
 state.extendQuestId=state.extendQuestId||null;
-// Repair duplicate Quest IDs created by early recurring-occurrence generation.
-// Duplicate IDs make getQuest(id) return the wrong occurrence/series when a Daily item is opened.
-{
-  const seenQuestIds=new Set();
-  state.quests.forEach((q,i)=>{
-    if(!q?.id)return;
-    if(seenQuestIds.has(q.id)){
-      q.id=`${q.id}-repair-${i}-${Math.random().toString(36).slice(2,7)}`;
-    }
-    seenQuestIds.add(q.id);
-  });
-}
-// Repair recurring-series collisions as well as Quest-ID collisions.
-// Earlier builds could give two different recurring Quests the same id; because seriesId
-// was copied from that id, repairing only q.id still left unrelated Daily Quests grouped together.
-{
-  const groups=new Map();
-  state.quests.filter(q=>q&&q.repeat&&q.repeat!=='Never').forEach(q=>{
-    const sid=q.seriesId||q.id;
-    if(!groups.has(sid))groups.set(sid,[]);
-    groups.get(sid).push(q);
-  });
-  groups.forEach((items,sid)=>{
-    const buckets=new Map();
-    items.forEach(q=>{
-      const key=[q.title||'',q.parentSubQuestId||'',q.repeat||'',JSON.stringify(q.repeatDays||[])].join('||');
-      if(!buckets.has(key))buckets.set(key,[]);
-      buckets.get(key).push(q);
-    });
-    if(buckets.size<=1)return;
-    let n=0;
-    buckets.forEach(bucket=>{
-      const newSid=`${sid}-series-repair-${n++}-${Math.random().toString(36).slice(2,7)}`;
-      bucket.forEach(q=>q.seriesId=newSid);
-    });
-  });
-}
 state.screen='home';
 // v4Q testing build: bypass onboarding while preserving tutorial code.
 if(!state.character)state.character={name:'Player',look:'Adventurer'};
@@ -432,7 +396,7 @@ function scheduledOnDate(q,dateISO){
 function ensureRecurringOccurrences(){
   const today=todayISO();const templates=new Map();
   state.quests.filter(isRecurring).forEach(q=>{const sid=q.seriesId||q.id;q.seriesId=sid;if(!q.seriesStartDate)q.seriesStartDate=q.startDate||q.timeLimitDate||today;if(!q.occurrenceDate)q.occurrenceDate=q.timeLimitDate||q.startDate||today;if(!templates.has(sid)||q.occurrenceDate<templates.get(sid).occurrenceDate)templates.set(sid,q)});
-  templates.forEach((t,sid)=>{let d=new Date(t.seriesStartDate+'T12:00:00'),last=new Date(today+'T12:00:00');for(let guard=0;d<=last&&guard<730;guard++,d.setDate(d.getDate()+1)){const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;if(!scheduledOnDate(t,iso))continue;if(state.quests.some(q=>q.seriesId===sid&&q.occurrenceDate===iso))continue;state.quests.push({...t,id:'q-'+Date.now()+'-'+guard+'-'+Math.random().toString(36).slice(2,7),rootQuestId:null,completed:false,earnedStars:0,completedAt:null,occurrenceDate:iso,startDate:iso,timeLimitDate:iso,seriesId:sid});}}
+  templates.forEach((t,sid)=>{let d=new Date(t.seriesStartDate+'T12:00:00'),last=new Date(today+'T12:00:00');for(let guard=0;d<=last&&guard<730;guard++,d.setDate(d.getDate()+1)){const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;if(!scheduledOnDate(t,iso))continue;if(state.quests.some(q=>q.seriesId===sid&&q.occurrenceDate===iso))continue;state.quests.push({...t,id:'q-'+Date.now()+'-'+guard,rootQuestId:null,completed:false,earnedStars:0,completedAt:null,occurrenceDate:iso,startDate:iso,timeLimitDate:iso,seriesId:sid});}}
   );save();
 }
 function recurringSeries(){ensureRecurringOccurrences();const m=new Map();state.quests.filter(isRecurring).forEach(q=>{const sid=q.seriesId||q.id;if(!m.has(sid))m.set(sid,[]);m.get(sid).push(q)});return m}
@@ -658,6 +622,21 @@ function questEditor(mode='create', questId=null, defaults={}){
     <div class="field" id="customReminderTimeWrap" style="${(q?.reminder||'No Reminder')==='Custom'?'':'display:none'}"><label>Reminder Time (Optional)</label><input id="qeReminderTime" type="time" value="${q?.reminderTime||''}"><div class="sub small" style="margin-top:6px">Leave blank for end of day.</div></div>
   </div><div class="sticky-actions ${mode==='edit'?'':'two'}"><button class="btn primary" onclick="saveQuestEditor('${mode}','${questId||''}')">${mode==='edit'?'Save Changes':(type==='Cornerstone Quest'?'Create Active Quest':'Create Quest')}</button>${mode==='edit'?`<button class="btn danger" onclick="deleteQuest('${questId}')">Delete Quest</button>`:''}<button class="btn ghost" onclick="${mode==='edit'?"go('questDetail')":'cancelQuestEditorCreate()'}">${mode==='edit'?'Cancel':'Back'}</button></div></div>`;
 }
+function deleteQuest(id){
+  const q=getQuest(id);if(!q)return;
+  let message='Deleting this Quest will permanently remove it and its history. This cannot be undone.';
+  if(isRecurring(q))message='Deleting this recurring Quest will permanently remove the entire recurring series and its history. This cannot be undone.';
+  if(!confirm(message))return;
+  if(isRecurring(q)){
+    const sid=q.seriesId||q.id;
+    state.quests=state.quests.filter(x=>(x.seriesId||x.id)!==sid);
+  }else{
+    const root=q.rootQuestId||q.id;
+    state.quests=state.quests.filter(x=>x.id!==root&&x.rootQuestId!==root);
+  }
+  state.currentQuest=null;state.questInstanceViewId=null;
+  save();go(state.detailReturn||'questList');
+}
 function toggleCustomRepeat(){const e=document.getElementById('customRepeatWrap');if(e)e.style.display=document.getElementById('qeRepeat')?.value==='Custom'?'':'none'}
 function toggleCustomReminder(){const on=document.getElementById('qeReminder')?.value==='Custom';['customReminderDateWrap','customReminderTimeWrap'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=on?'':'none'})}
 function pickEditorStars(n){createStars=n;document.querySelectorAll('#qeStars .star').forEach(el=>{const on=Number(el.dataset.n)<=n;el.classList.toggle('gold',on);el.classList.toggle('empty',!on)})}
@@ -714,39 +693,94 @@ function saveQuestEditor(mode,id){
   if(d.returnType&&d.returnId){openHierarchyDetail(d.returnType,d.returnId);return}
   go(type==='Cornerstone Quest'?'cornerstoneLanding':'home');
 }
+function questSearchText(q){
+  const parts=[q.title||''];
+  if(q.parentSubQuestId){
+    const h=questHierarchyFor(q)||{};
+    if(h.sub)parts.push(h.sub.title||'');
+    if(h.chapter){parts.push(h.chapter.title||'');parts.push(h.chapter.cornerstone||'')}
+  }else parts.push('Free Quest');
+  return parts.join(' ').toLowerCase()
+}
+function questHierarchyLabel(q){
+  if(!q.parentSubQuestId)return 'Free Quest';
+  const h=questHierarchyFor(q)||{};
+  return [h.chapter?.cornerstone,h.chapter?.title,h.sub?.title].filter(Boolean).join(' › ')||'Active Quest'
+}
+function questLogResults(){
+  const filter=state.questTab||'all',query=(state.questSearch||'').trim().toLowerCase();
+  const roots=new Map();
+  state.quests.filter(q=>!isRecurring(q)).forEach(q=>{const r=questLineageRoot(q);if(r)roots.set(r.id,r)});
+  let rows=[...roots.values()].map(r=>{
+    const hist=questLineageHistory(r),latest=hist[hist.length-1]||r;
+    return {root:r,latest};
+  }).filter(x=>filteredQuest(x.latest,filter));
+  if(query)rows=rows.filter(x=>questSearchText(x.latest).includes(query));
+  rows.sort((a,b)=>{
+    if(a.latest.completed!==b.latest.completed)return a.latest.completed?1:-1;
+    return (a.latest.timeLimitDate||'9999-12-31').localeCompare(b.latest.timeLimitDate||'9999-12-31')||(a.latest.title||'').localeCompare(b.latest.title||'')
+  });
+  const normal=rows.map(({root,latest})=>{
+    const earned=cumulativeEarnedStars(root),max=root.stars||latest.stars||0;
+    const status=latest.completed?'Completed':'Active';
+    return `<div class="card quest-card ${latest.completed?'completed':''}" onclick="openLoggedQuest('${latest.id}',false)">
+      <div class="between"><strong>${esc(latest.title)}</strong><span>${starDisplay(max,earned,latest.completed)}</span></div>
+      <div class="sub small">${esc(questHierarchyLabel(latest))}</div>
+      <div class="sub small">${status}${latest.timeLimitDate?' · Due '+esc(latest.timeLimitDate):''}</div>
+    </div>`
+  }).join('');
+  const recurring=[];
+  recurringSeries().forEach((items,sid)=>{
+    const latest=items.slice().sort((a,b)=>(b.occurrenceDate||'').localeCompare(a.occurrenceDate||''))[0];
+    if(!latest)return;
+    const hasActive=items.some(q=>!q.completed),hasCompleted=items.some(q=>q.completed);
+    if(filter==='active'&&!hasActive)return;
+    if(filter==='completed'&&!hasCompleted)return;
+    const search=[latest.title||'','Recurring Quest',latest.repeat||''].join(' ').toLowerCase();
+    if(query&&!search.includes(query))return;
+    const unresolved=items.filter(q=>!q.completed).length;
+    recurring.push(`<div class="card quest-card" onclick="openRoutineFolder('${sid}')">
+      <div class="between"><strong>${esc(latest.title)}</strong><span class="folder-meta">Recurring</span></div>
+      <div class="sub small">${esc(latest.repeat||'Recurring')} · ${unresolved} unresolved</div>
+    </div>`)
+  });
+  return normal+recurring.join('')||'<div class="card sub">No Quests match this view.</div>'
+}
+function setQuestSearch(v){
+  state.questSearch=v;save();
+  const el=document.getElementById('questLogResults');if(el)el.innerHTML=questLogResults()
+}
+function clearQuestSearch(){
+  state.questSearch='';save();
+  const input=document.getElementById('questSearchInput');if(input)input.value='';
+  const el=document.getElementById('questLogResults');if(el)el.innerHTML=questLogResults()
+}
 function questList(){
   syncTutorial();
-  const filter=state.questTab||'all',folder=state.questLogFolder;let body='';
-  if(!folder){
-    const freeRoots=new Map();state.quests.filter(q=>!q.parentSubQuestId&&!isRecurring(q)).forEach(q=>{const r=questLineageRoot(q);if(r)freeRoots.set(r.id,r)});
-    const free=[...freeRoots.values()],freeDone=free.filter(r=>questLineageHistory(r).some(x=>x.completed)).length,freeEarned=free.reduce((s,r)=>s+cumulativeEarnedStars(r),0),freeMax=free.reduce((s,r)=>s+(r.stars||0),0);
-    const freeVisible=free.filter(r=>{const latest=questLineageHistory(r).slice(-1)[0]||r;return filteredQuest(latest,filter)}).length;
-    if(filter==='all'||freeVisible)body+=`<div class="card quest-card" onclick="openQuestFolder('free')"><strong>Free Quests</strong><div class="folder-meta">Active Quests: ${freeDone}/${free.length}</div><div class="folder-meta">★: ${freeEarned}/${freeMax}</div></div>`;
-    orderedChapters(state.placedCornerstone?.name||'').forEach(()=>{});
-    state.chapterQuests.forEach(ch=>{const st=chapterQuestStats(ch.id,filter);if(filter!=='all'&&!st.visible)return;body+=`<div class="card quest-card" onclick="openQuestFolder('chapter','${ch.id}')"><div class="between"><strong>${esc(ch.title)}</strong><span class="folder-meta">Active Quests: ${st.completeCount}/${st.totalCount}</span></div><div class="between"><span class="folder-meta">${esc(ch.cornerstone)}</span><span class="folder-meta">★: ${st.earned}/${st.max}</span></div></div>`});
-  }else if(folder.kind==='recurring'){
-    ensureRecurringOccurrences();const series=recurringSeries();body=[...series.entries()].map(([sid,items])=>{const t=items[0],unresolved=items.filter(q=>!q.completed).length;return `<div class="card quest-card" onclick="openRoutineFolder('${sid}')"><strong>${esc(t.title)}</strong><div class="folder-meta">${unresolved} unresolved · ${esc(t.repeat)}</div></div>`}).join('')||'<div class="card sub">No recurring Quests.</div>';
-  }else if(folder.kind==='freeSub'){
-    const sub=state.subQuests.find(x=>x.id===folder.id),qs=state.quests.filter(q=>q.parentSubQuestId===folder.id&&!isRecurring(q)).sort(activeQuestSort);body=`<h3>${esc(sub?.title||'Sub-Quest')}</h3>`+(qs.length?qs.map(q=>`<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><strong>${esc(logicalQuestLabel(q))}</strong><div class="quest-stars-mini">${starDisplay(q.stars,q.earnedStars||0,q.completed)}</div></div>`).join(''):'<div class="card sub">No Active Quests.</div>');
-  }else if(folder.kind==='free'){
-    const freeSubs=freeSubQuests();body+=freeSubs.map(x=>`<div class="card quest-card" onclick="openQuestFolder('freeSub','${x.id}')"><strong>${esc(x.title)}</strong><div class="folder-meta">Sub-Quest</div></div>`).join('');
-    const roots=new Map();state.quests.filter(q=>!q.parentSubQuestId&&!isRecurring(q)).forEach(q=>{const r=questLineageRoot(q);if(r)roots.set(r.id,r)});
-    const qs=[...roots.values()].map(r=>questLineageHistory(r).slice(-1)[0]||r).filter(q=>filteredQuest(q,filter)).sort(activeQuestSort);
-    body+=qs.length?qs.map(q=>`<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><strong>${esc(logicalQuestLabel(q))}</strong><div class="quest-stars-mini">${'★'.repeat(cumulativeEarnedStars(q))}${'☆'.repeat(Math.max(0,(questLineageRoot(q)?.stars||q.stars||0)-cumulativeEarnedStars(q)))}</div></div>`).join(''):'<div class="card sub">No Free Quests in this view.</div>';
-  }else if(folder.kind==='chapter'){
-    const ch=state.chapterQuests.find(c=>c.id===folder.id),subs=orderedSubs(folder.id);
-    body=`<h3>${esc(ch?.title||'Chapter Quest')}</h3>`+subs.filter(s=>filter==='all'||subQuestStats(s.id,filter).visible).map(s=>{const st=subQuestStats(s.id,filter);return `<div class="card quest-card" onclick="openQuestFolder('sub','${s.id}')"><strong>${esc(s.title)}</strong><div class="folder-meta">Active Quests: ${st.completeCount}/${st.totalCount}</div><div class="folder-meta">★: ${st.earned}/${st.max}</div></div>`}).join('');
-    if(!subs.length)body+='<div class="card sub">No Sub-Quests.</div>';
-  }else if(folder.kind==='sub'){
-    const sub=state.subQuests.find(x=>x.id===folder.id),roots=new Map();state.quests.filter(q=>q.parentSubQuestId===folder.id).forEach(q=>{const r=questLineageRoot(q);if(r)roots.set(r.id,r)});
-    const qs=[...roots.values()].map(r=>questLineageHistory(r).slice(-1)[0]||r).filter(q=>filteredQuest(q,filter)).sort(activeQuestSort);
-    body=`<h3>${esc(sub?.title||'Sub-Quest')}</h3>`+(qs.length?qs.map(q=>`<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><strong>${esc(logicalQuestLabel(q))}</strong><div class="quest-stars-mini">${'★'.repeat(cumulativeEarnedStars(q))}${'☆'.repeat(Math.max(0,(questLineageRoot(q)?.stars||q.stars||0)-cumulativeEarnedStars(q)))}</div></div>`).join(''):'<div class="card sub">No Active Quests in this view.</div>');
-  }
-  return `<div class="screen with-sticky"><h2>Quests</h2><div class="tabs"><button class="tab ${filter==='all'?'active':''}" onclick="setQuestTab('all')">All</button><button class="tab ${filter==='active'?'active':''}" onclick="setQuestTab('active')">Active</button><button class="tab ${filter==='completed'?'active':''}" onclick="setQuestTab('completed')">Completed</button></div><div id="questCards">${body}</div><div class="sticky-actions two"><button class="btn primary" onclick="state.editorDefaults={questType:'Free Quest'};go('createQuest')">＋ Create Quest</button><button class="btn ghost" onclick="folderBack()">Back</button></div></div>`;
+  return `<div class="screen"><h2>Quest Log</h2>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+      <input id="questSearchInput" aria-label="Search Quests" placeholder="Search Quests" value="${esc(state.questSearch||'')}" oninput="setQuestSearch(this.value)" style="flex:1">
+      ${(state.questSearch||'')?`<button class="btn ghost" style="width:auto;margin:0" onclick="clearQuestSearch()">Clear</button>`:''}
+    </div>
+    <div class="tabs">
+      <button class="tab ${(state.questTab||'all')==='all'?'active':''}" onclick="state.questTab='all';save();render()">All</button>
+      <button class="tab ${state.questTab==='active'?'active':''}" onclick="state.questTab='active';save();render()">Active</button>
+      <button class="tab ${state.questTab==='completed'?'active':''}" onclick="state.questTab='completed';save();render()">Completed</button>
+    </div>
+    <div id="questLogResults">${questLogResults()}</div>
+    <button class="btn primary" onclick="go('create')">＋ Create</button>
+    <button class="btn ghost" onclick="go('home')">Back</button>
+  </div>`
 }
+
 function setQuestTab(t){state.questTab=t;save();render()}
 function filterQuestCards(){const q=document.getElementById('questSearch').value.toLowerCase();document.querySelectorAll('.quest-card').forEach(el=>el.style.display=el.dataset.title.includes(q)?'block':'none')}
-function openLoggedQuest(id,isTutorial){const q=isTutorial?getTutorial(id):getQuest(id);if(!q)return;state.detailReturn='questList';state.currentQuest={kind:isTutorial?'tutorial':'quest',...q};go('questDetail')}
+function openLoggedQuest(id,isTutorial){
+  const q=isTutorial?getTutorial(id):getQuest(id);if(!q)return;
+  state.detailReturn=state.screen||'home';
+  state.currentQuest={kind:isTutorial?'tutorial':'quest',...q};
+  save();go('questDetail')
+}
 
 function characterProfile(){
   return `<div class="screen"><h2>Character Profile</h2><div class="card center"><div style="font-size:72px">🧍</div><h3>${esc(state.character?.name||'Player')}</h3><p class="sub">Level ${state.level} · ${state.xp} XP · 🪙 ${state.coins}</p></div><p class="sub small">Prototype profile only. Full Character/Profile design remains bookmarked.</p><button class="btn ghost" onclick="go('home')">Back</button></div>`;
