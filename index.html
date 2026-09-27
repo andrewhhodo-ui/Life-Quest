@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4T</title>
+<title>Life Quest Prototype v4U</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -144,6 +144,7 @@ state.questSearch=state.questSearch||'';
 state.questLogView=state.questLogView||'flat';
 state.navHistory=Array.isArray(state.navHistory)?state.navHistory:[];
 state.editCompletionId=state.editCompletionId||null;
+state.completedFolderSubId=state.completedFolderSubId||null;
 state.questInstanceViewId=state.questInstanceViewId||null;
 state.extendQuestId=state.extendQuestId||null;
 state.screen='home';
@@ -195,6 +196,9 @@ function persistentNav(){
     <button class="nav" onclick="openQuestLog()">Quest Log</button>
     <button class="nav" onclick="navBack()">Back</button>
   </div>`
+}
+function renderDirect(html){
+  app().innerHTML=html+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());
 }
 function reset(){localStorage.removeItem(SAVE_KEY);state=JSON.parse(JSON.stringify(DEFAULT));render()}
 function app(){return document.getElementById('app')}
@@ -452,8 +456,38 @@ function dueList(){
   const limit=new Date(now.getTime()+3*86400000);
   const qs=state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d).sort((a,b)=>a.d-b.d);
   const groups=[['Overdue',qs.filter(x=>x.d<now)],['Today',qs.filter(x=>x.q.timeLimitDate===today&&x.d>=now)],['Tomorrow',qs.filter(x=>x.q.timeLimitDate===tomorrow)],['Next 3 Days',qs.filter(x=>x.d>now&&x.d<=limit&&x.q.timeLimitDate!==today&&x.q.timeLimitDate!==tomorrow)]];
-  return `<div class="screen"><h2>Due Quests</h2>${groups.map(([name,items])=>items.length?`<h3>${name}</h3>${items.map(x=>focusQuestCard(x.q)).join('')}`:'').join('')||'<div class="focus-empty">No due Quests.</div>'}<button class="btn ghost" onclick="go('focusView')">Back</button></div>`;
+  return `<div class="screen"><h2>Due Quests</h2>${groups.map(([name,items])=>items.length?`<h3>${name}</h3>${items.map(x=>focusQuestCard(x.q)).join('')}`:'').join('')||'<div class="focus-empty">No due Quests.</div>'}</div>`;
 }
+
+function freshQuestId(){
+  let id; do{id='q-'+Date.now()+'-'+Math.random().toString(36).slice(2,9)}while(state.quests.some(q=>q.id===id)); return id;
+}
+function repairRecurringIntegrity(){
+  let changed=false;
+  // Every Quest occurrence must have a unique id.
+  const seen=new Set();
+  state.quests.forEach(q=>{if(!q.id||seen.has(q.id)){q.id=freshQuestId();changed=true}seen.add(q.id)});
+  // Split a legacy collided seriesId when its records clearly describe different recurring series.
+  const bySid=new Map();
+  state.quests.filter(isRecurring).forEach(q=>{const sid=q.seriesId||q.id;if(!bySid.has(sid))bySid.set(sid,[]);bySid.get(sid).push(q)});
+  bySid.forEach((items,sid)=>{
+    const buckets=new Map();
+    items.forEach(q=>{
+      const key=[q.title||'',q.parentSubQuestId||'',q.repeat||'',JSON.stringify(q.repeatDays||[]),q.seriesStartDate||q.startDate||''].join('|');
+      if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(q);
+    });
+    if(buckets.size>1){
+      let first=true;
+      buckets.forEach(group=>{
+        const newSid=first?sid:'series-'+Date.now()+'-'+Math.random().toString(36).slice(2,9); first=false;
+        group.forEach(q=>{if(q.seriesId!==newSid){q.seriesId=newSid;changed=true}});
+      });
+    }
+  });
+  if(changed)save();
+}
+repairRecurringIntegrity();
+
 function scheduledOnDate(q,dateISO){
   if(!isRecurring(q))return false;const d=new Date(dateISO+'T12:00:00'),start=new Date((q.seriesStartDate||q.startDate||dateISO)+'T12:00:00');if(d<start)return false;
   if(q.repeat==='Daily')return true;
@@ -465,7 +499,7 @@ function scheduledOnDate(q,dateISO){
 function ensureRecurringOccurrences(){
   const today=todayISO();const templates=new Map();
   state.quests.filter(isRecurring).forEach(q=>{const sid=q.seriesId||q.id;q.seriesId=sid;if(!q.seriesStartDate)q.seriesStartDate=q.startDate||q.timeLimitDate||today;if(!q.occurrenceDate)q.occurrenceDate=q.timeLimitDate||q.startDate||today;if(!templates.has(sid)||q.occurrenceDate<templates.get(sid).occurrenceDate)templates.set(sid,q)});
-  templates.forEach((t,sid)=>{let d=new Date(t.seriesStartDate+'T12:00:00'),last=new Date(today+'T12:00:00');for(let guard=0;d<=last&&guard<730;guard++,d.setDate(d.getDate()+1)){const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;if(!scheduledOnDate(t,iso))continue;if(state.quests.some(q=>q.seriesId===sid&&q.occurrenceDate===iso))continue;state.quests.push({...t,id:'q-'+Date.now()+'-'+guard,rootQuestId:null,completed:false,earnedStars:0,completedAt:null,occurrenceDate:iso,startDate:iso,timeLimitDate:iso,seriesId:sid});}}
+  templates.forEach((t,sid)=>{let d=new Date(t.seriesStartDate+'T12:00:00'),last=new Date(today+'T12:00:00');for(let guard=0;d<=last&&guard<730;guard++,d.setDate(d.getDate()+1)){const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;if(!scheduledOnDate(t,iso))continue;if(state.quests.some(q=>q.seriesId===sid&&q.occurrenceDate===iso))continue;state.quests.push({...t,id:freshQuestId(),rootQuestId:null,completed:false,earnedStars:0,completedAt:null,occurrenceDate:iso,startDate:iso,timeLimitDate:iso,seriesId:sid});}}
   );save();
 }
 function recurringSeries(){ensureRecurringOccurrences();const m=new Map();state.quests.filter(isRecurring).forEach(q=>{const sid=q.seriesId||q.id;if(!m.has(sid))m.set(sid,[]);m.get(sid).push(q)});return m}
@@ -480,12 +514,12 @@ function focusView(){
   if(tab==='focus')body=chapter?`<div class="card"><div class="between"><div><strong>${esc(chapter.title)}</strong><div class="sub small">${esc(chapter.cornerstone)}</div></div><button class="btn" style="width:auto;margin:0" onclick="openHierarchyDetail('chapter','${chapter.id}')">Open Chapter</button></div></div>${fq.length?fq.map(focusQuestCard).join(''):'<div class="focus-empty">No non-repeatable Active Quests are waiting here.</div>'}<button class="btn primary" onclick="${state.subQuests.some(s=>s.chapterId===chapter.id)?`openCreateActiveQuest('${state.subQuests.find(s=>s.chapterId===chapter.id).id}')`:`openHierarchyDetail('chapter','${chapter.id}')`}">＋ Active Quest</button><button class="btn" onclick="go('focusChoose')">Change Focus Quest</button>`:`<div class="focus-empty">Choose a Chapter Quest to make it your Focus.</div><button class="btn primary" onclick="go('focusChoose')">Choose Focus Quest</button>`;
   else if(tab==='daily')body=`${daily.length?daily.map(dailyCard).join(''):'<div class="focus-empty">No recurring Quests scheduled for today.</div>'}<button class="btn" onclick="state.questLogFolder={kind:'recurring'};go('questList')">View All Recurring Quests</button>`;
   else body=`${due.length?due.map(focusQuestCard).join(''):'<div class="focus-empty">Nothing due in the next 3 days.</div>'}${(()=>{const c=dueSummaryCounts();return `<div class="due-summary" onclick="go('dueList')">${c.overdue?c.overdue+' overdue · ':''}${c.dueToday?c.dueToday+' due today · ':''}${c.next3} due in next 3 days</div>`})()}`;
-  return `<div class="screen focus-panel"><h2>Focus</h2><div class="tabs"><button class="tab ${tab==='due'?'active':''}" onclick="setFocusTab('due')">Due Soon</button><button class="tab ${tab==='focus'?'active':''}" onclick="setFocusTab('focus')">Focus</button><button class="tab ${tab==='daily'?'active':''}" onclick="setFocusTab('daily')">Daily</button></div>${body}<button class="btn ghost" onclick="go('home')">Back</button></div>`;
+  return `<div class="screen focus-panel"><h2>Focus</h2><div class="tabs"><button class="tab ${tab==='due'?'active':''}" onclick="setFocusTab('due')">Due Soon</button><button class="tab ${tab==='focus'?'active':''}" onclick="setFocusTab('focus')">Focus</button><button class="tab ${tab==='daily'?'active':''}" onclick="setFocusTab('daily')">Daily</button></div>${body}</div>`;
 }
 function openRoutineFolder(seriesId){state.routineSeriesId=seriesId;state.bulkSelected=[];save();go('routineFolder')}
 function routineFolder(){
   ensureRecurringOccurrences();const sid=state.routineSeriesId,items=(recurringSeries().get(sid)||[]).slice().sort((a,b)=>(b.occurrenceDate||'').localeCompare(a.occurrenceDate||''));const title=items[0]?.title||'Recurring Quest';
-  return `<div class="screen"><h2>${esc(title)}</h2><p class="sub">Newest occurrence first.</p><button class="btn" onclick="toggleSelectAllRoutine('${sid}')">Select All Unresolved</button>${items.map(q=>`<div class="card routine-row ${q.completed?'completed':''}"><div class="check-row"><input type="checkbox" class="routine-check" value="${q.id}" ${q.completed?'disabled':''}><div style="flex:1" onclick="openLoggedQuest('${q.id}',false)"><div class="routine-date">${q.occurrenceDate===todayISO()?'Today · ':''}${esc(q.occurrenceDate||q.timeLimitDate||'')}</div><div class="sub small">${q.completed?'Resolved · '+(q.earnedStars||0)+'/'+q.stars+' stars':(q.occurrenceDate<todayISO()?'Overdue':'Due today')}</div></div></div></div>`).join('')}<button class="btn primary" onclick="beginBulkResolve('${sid}')">Resolve Selected</button><button class="btn ghost" onclick="go('focusView')">Back</button></div>`;
+  return `<div class="screen"><h2>${esc(title)}</h2><p class="sub">Newest occurrence first.</p><button class="btn" onclick="toggleSelectAllRoutine('${sid}')">Select All Unresolved</button>${items.map(q=>`<div class="card routine-row ${q.completed?'completed':''}"><div class="check-row"><input type="checkbox" class="routine-check" value="${q.id}" ${q.completed?'disabled':''}><div style="flex:1" onclick="openLoggedQuest('${q.id}',false)"><div class="routine-date">${q.occurrenceDate===todayISO()?'Today · ':''}${esc(q.occurrenceDate||q.timeLimitDate||'')}</div><div class="sub small">${q.completed?'Resolved · '+(q.earnedStars||0)+'/'+q.stars+' stars':(q.occurrenceDate<todayISO()?'Overdue':'Due today')}</div></div></div></div>`).join('')}<button class="btn primary" onclick="beginBulkResolve('${sid}')">Resolve Selected</button></div>`;
 }
 function toggleSelectAllRoutine(){const boxes=[...document.querySelectorAll('.routine-check:not(:disabled)')];const all=boxes.length&&boxes.every(b=>b.checked);boxes.forEach(b=>b.checked=!all)}
 function beginBulkResolve(sid){const ids=[...document.querySelectorAll('.routine-check:checked')].map(x=>x.value);if(!ids.length){alert('Select at least one Quest.');return}state.bulkSelected=ids;state.routineSeriesId=sid;state.resolutionStars=0;save();go('bulkResolve')}
@@ -495,7 +529,7 @@ function submitBulkResolution(){const earned=state.resolutionStars;(state.bulkSe
 
 function focusChoose(){
   const active=state.chapterQuests;
-  return `<div class="screen"><h2>Choose Your Focus Quest</h2><p class="sub">Pick the Chapter Quest you most want to move forward right now.</p>${active.length?active.map(c=>`<div class="card" onclick="chooseFocusChapter('${c.id}')"><strong>${esc(c.title)}</strong><div class="sub small">${esc(c.cornerstone)} · ${esc(c.archetype||'')}</div></div>`).join(''):'<div class="card sub">Create a Chapter Quest first.</div>'}<button class="btn ghost" onclick="go('home')">Back</button></div>`;
+  return `<div class="screen"><h2>Choose Your Focus Quest</h2><p class="sub">Pick the Chapter Quest you most want to move forward right now.</p>${active.length?active.map(c=>`<div class="card" onclick="chooseFocusChapter('${c.id}')"><strong>${esc(c.title)}</strong><div class="sub small">${esc(c.cornerstone)} · ${esc(c.archetype||'')}</div></div>`).join(''):'<div class="card sub">Create a Chapter Quest first.</div>'}</div>`;
 }
 
 function home(){
@@ -601,8 +635,8 @@ function questDetail(){
     ${q.kind!=='tutorial'&&instances.length>1?`<div class="history-block"><div class="sub small">Quest History</div>${instances.map((h,i)=>`<div class="sub small">${i===0?'Complete task':'Reopened to finish remaining work'} — earned ${'★'.repeat(h.earnedStars||0)}${'☆'.repeat(Math.max(0,(h.stars||0)-(h.earnedStars||0)))}</div>`).join('')}<div class="sub small">Total: ${'★'.repeat(cumulative)}${'☆'.repeat(Math.max(0,viewed.stars-cumulative))}</div></div>`:''}
     <div class="sticky-actions">
       <button class="btn primary" ${canComplete||viewed.completed?'':'disabled'} ${viewed.completed?'disabled':''} onclick="state.currentQuest={kind:'quest',...getQuest('${viewed.id}')};state.resolutionStars=${viewed.rootQuestId?`getQuest('${viewed.id}').earnedStars||0`:'0'};go('resolve')">Complete Quest</button>
-      <button class="btn" ${q.kind==='tutorial'?'disabled':''} onclick="app().innerHTML=questEditor('edit','${viewed.id}')">${isOverdue?'Extend Quest':'Edit Quest'}</button>
-      <button class="btn ghost" onclick="go(state.detailReturn||'home')">Back</button>
+      <button class="btn" ${q.kind==='tutorial'?'disabled':''} onclick="renderDirect(questEditor('edit','${viewed.id}'))">${isOverdue?'Extend Quest':'Edit Quest'}</button>
+      
     </div></div>`;
 }
 function resolve(){
@@ -644,7 +678,7 @@ function submitResolution(){
 }
 function reward(){return `<div class="screen center"><div style="font-size:50px">✨</div><h2>Quest Resolved</h2><p class="sub">XP and coins were added.</p><button class="btn primary" onclick="go('home')">Return Home</button></div>`}
 
-function createMenu(){return `<div class="screen"><h2>Create</h2><div class="card"><button class="btn primary" onclick="go('createQuestMenu')">＋ Quest</button><button class="btn" onclick="go('createBuildingMenu')">＋ Building</button></div><button class="btn ghost" onclick="go('home')">Back</button></div>`;}
+function createMenu(){return `<div class="screen"><h2>Create</h2><div class="card"><button class="btn primary" onclick="go('createQuestMenu')">＋ Quest</button><button class="btn" onclick="go('createBuildingMenu')">＋ Building</button></div></div>`;}
 function createQuestMenu(){return `<div class="screen"><h2>Create Quest</h2><div class="card"><button class="btn primary" onclick="state.editorDefaults={questType:'Free Quest'};go('createQuest')">＋ Free Quest</button><button class="btn" ${state.requirements.cornerstonePlaced?'':'disabled'} onclick="go('createChapter')">＋ Chapter Quest ${state.requirements.cornerstonePlaced?'':'🔒'}</button><button class="btn" onclick="state.subQuestDefaults=null;go('createSubQuest')">＋ Sub-Quest</button><button class="btn" ${state.subQuests.length?'':'disabled'} onclick="state.editorDefaults={questType:'Cornerstone Quest',cornerstone:'Free Quest'};go('createQuest')">＋ Active Quest ${state.subQuests.length?'':'🔒'}</button></div><button class="btn ghost" onclick="go('createMenu')">Back</button></div>`;}
 function createBuildingMenu(){const canCorner=canPlaceCornerstone();return `<div class="screen"><h2>Create Building</h2><div class="card"><button class="btn primary" ${canCorner?'':'disabled'} onclick="go('cornerstonePick')">＋ Cornerstone ${canCorner?'':'🔒'}</button><button class="btn" disabled>Reward Shop 🔒</button></div><button class="btn ghost" onclick="go('createMenu')">Back</button></div>`;}
 
@@ -707,7 +741,7 @@ function toggleCustomReminder(){const on=document.getElementById('qeReminder')?.
 function pickEditorStars(n){createStars=n;document.querySelectorAll('#qeStars .star').forEach(el=>{const on=Number(el.dataset.n)<=n;el.classList.toggle('gold',on);el.classList.toggle('empty',!on)})}
 function refreshQuestEditor(mode,id,cornerChanged=false,chapterChanged=false){
   const type=document.getElementById('qeType')?.value||'Free Quest',corner=document.getElementById('qeCorner')?.value||'',chapter=document.getElementById('qeChapter')?.value||'',sub=document.getElementById('qeSub')?.value||'';
-  const prior=state.editorDefaults||{};const defaults={questType:type,cornerstone:corner,chapterId:cornerChanged?'':chapter,subQuestId:(cornerChanged||chapterChanged)?'':sub,title:document.getElementById('qeTitle')?.value||'',lockHierarchy:!!prior.lockHierarchy,returnType:prior.returnType,returnId:prior.returnId};state.editorDefaults=defaults;save();app().innerHTML=questEditor(mode,id,defaults)
+  const prior=state.editorDefaults||{};const defaults={questType:type,cornerstone:corner,chapterId:cornerChanged?'':chapter,subQuestId:(cornerChanged||chapterChanged)?'':sub,title:document.getElementById('qeTitle')?.value||'',lockHierarchy:!!prior.lockHierarchy,returnType:prior.returnType,returnId:prior.returnId};state.editorDefaults=defaults;save();renderDirect(questEditor(mode,id,defaults))
 }
 function saveQuestEditor(mode,id){
   const title=document.getElementById('qeTitle').value.trim();
@@ -863,7 +897,7 @@ function openLoggedQuest(id,isTutorial){
 }
 
 function characterProfile(){
-  return `<div class="screen"><h2>Character Profile</h2><div class="card center"><div style="font-size:72px">🧍</div><h3>${esc(state.character?.name||'Player')}</h3><p class="sub">Level ${state.level} · ${state.xp} XP · 🪙 ${state.coins}</p></div><p class="sub small">Prototype profile only. Full Character/Profile design remains bookmarked.</p><button class="btn ghost" onclick="go('home')">Back</button></div>`;
+  return `<div class="screen"><h2>Character Profile</h2><div class="card center"><div style="font-size:72px">🧍</div><h3>${esc(state.character?.name||'Player')}</h3><p class="sub">Level ${state.level} · ${state.xp} XP · 🪙 ${state.coins}</p></div><p class="sub small">Prototype profile only. Full Character/Profile design remains bookmarked.</p></div>`;
 }
 
 const CORNERS=[['➕','Physical Health'],['🧭','Career'],['📖','Education'],['🤝','Relationships'],['🧠','Mental Health'],['🙏','Spirituality'],['🚪','Household'],['💰','Finances']];
@@ -936,7 +970,7 @@ function cornerstoneLanding(){
  const c=state.placedCornerstone;if(!c)return home();const chapters=orderedChapters(c.name);
  return `<div class="screen"><div class="between"><h2>${c.icon} ${esc(c.name)}</h2><span>${state.constructionStage?'🏗️':''}</span></div>
  ${chapters.length?chapters.map(ch=>{const collapsed=!!state.chapterCollapsed[ch.id];return `<div class="chapter-row" data-chapter-id="${ch.id}" ondragover="event.preventDefault()" ondrop="chapterDrop(event,'${ch.id}','${esc(c.name)}')"><span class="drag-handle" draggable="true" ondragstart="chapterDragStart(event,'${ch.id}')" onpointerdown="beginPointerReorder(event,'chapter','${ch.id}')" onpointermove="movePointerReorder(event)" onpointerup="endPointerReorder(event)" onpointercancel="endPointerReorder(event)">≡</span><div class="card chapter-main" onclick="openHierarchyDetail('chapter','${ch.id}')"><div class="between"><strong>${esc(ch.title)}</strong><span>${esc(ch.archetype)}</span></div><div class="progress"><div style="width:${ch.progress||0}%"></div></div><div class="sub small">${ch.progress||0}% complete</div>${collapsed?'':`<div class="chapter-subscroll">${renderSubTree(ch.id)}</div>`}</div><div class="chapter-controls"><button onclick="toggleChapterCollapsed('${ch.id}',event)">${collapsed?'⌄':'⌃'}</button></div></div>`}).join(''):'<div class="card sub">No Chapter Quests yet.</div>'}
- <button class="btn primary" onclick="go('cornerstoneCreateMenu')">＋ Create Quest</button><button class="btn" onclick="moveCornerstone()">Move Cornerstone</button><button class="btn ghost" onclick="go('home')">Back</button></div>`;
+ <button class="btn primary" onclick="go('cornerstoneCreateMenu')">＋ Create Quest</button><button class="btn" onclick="moveCornerstone()">Move Cornerstone</button></div>`;
 }
 const SUBQUEST_RARITIES=['Common','Uncommon','Rare','Epic','Legendary'];
 const SUBQUEST_RARITY_HELP={
@@ -967,7 +1001,7 @@ function cornerstoneCreateMenu(){return `<div class="screen"><h2>Create in ${esc
 function editChapterQuest(id){
   const ch=state.chapterQuests.find(x=>x.id===id);if(!ch)return;
   const opts=ARCH[ch.cornerstone]||[];
-  app().innerHTML=`<div class="screen with-sticky">
+  renderDirect(`<div class="screen with-sticky">
     <h2>Edit Chapter Quest</h2>
     <div class="field"><label>Cornerstone</label><input disabled value="${esc(ch.cornerstone)}"></div>
     <div class="field"><label>Archetype</label>
@@ -980,7 +1014,7 @@ function editChapterQuest(id){
       <button class="btn danger" onclick="deleteChapterQuest('${id}')">Delete Chapter Quest</button>
       <button class="btn ghost" onclick="openHierarchyDetail('chapter','${id}')">Cancel</button>
     </div>
-  </div>`;
+  </div>`);
 }
 function saveChapterQuest(id){
   const ch=state.chapterQuests.find(x=>x.id===id);if(!ch)return;
@@ -1023,7 +1057,7 @@ function editSubQuest(id){
   const sub=state.subQuests.find(x=>x.id===id);if(!sub)return;
   const chapter=state.chapterQuests.find(c=>c.id===sub.chapterId);
   const cornerstone=(sub.freeStanding||!sub.chapterId)?'Free Quest':(chapter?.cornerstone||cornerstoneNames()[0]||'');
-  app().innerHTML=`<div class="screen with-sticky">
+  renderDirect(`<div class="screen with-sticky">
     <h2>Edit Sub-Quest</h2>
     <div class="field"><label>Cornerstone</label><select id="editSubCornerstone" onchange="updateSubQuestChapterChoices('editSubCornerstone','editSubChapter')">${subQuestCornerstoneNames().map(n=>`<option value="${esc(n)}" ${n===cornerstone?'selected':''}>${esc(n)}</option>`).join('')}</select></div>
     <div class="field"><label>Chapter Quest</label><select id="editSubChapter">${subQuestChapterOptions(cornerstone,sub.chapterId)}</select></div>
@@ -1035,7 +1069,7 @@ function editSubQuest(id){
       <button class="btn danger" onclick="deleteSubQuest('${id}')">Delete Sub-Quest</button>
       <button class="btn ghost" onclick="openHierarchyDetail('sub','${id}')">Cancel</button>
     </div>
-  </div>`;
+  </div>`);
 }
 function saveSubQuest(id){
   const sub=state.subQuests.find(x=>x.id===id);if(!sub)return;
@@ -1058,6 +1092,16 @@ function deleteSubQuest(id){
   state.subQuests=state.subQuests.filter(s=>s.id!==id);
   save();go('cornerstoneLanding');
 }
+
+function openCompletedQuestFolder(subId){state.completedFolderSubId=subId;save();go('completedQuestFolder')}
+function completedQuestFolder(){
+  const sub=state.subQuests.find(x=>x.id===state.completedFolderSubId);if(!sub)return `<div class="screen"><h2>Completed Quests</h2><div class="card sub">Sub-Quest not found.</div></div>`;
+  const qs=state.quests.filter(q=>q.parentSubQuestId===sub.id&&q.completed).sort((a,b)=>new Date(b.completedAt||0)-new Date(a.completedAt||0));
+  return `<div class="screen"><h2>Completed Quests</h2><div class="sub" style="margin-bottom:12px">${esc(sub.title)}</div>
+    ${qs.length?qs.map(q=>`<div class="card completed" onclick="openHierarchyDetail('quest','${q.id}')"><div class="between"><strong>${esc(q.title)}</strong><span>Completed</span></div><div class="sub small">${starDisplay(q.stars,q.earnedStars||0,true)}</div></div>`).join(''):'<div class="card sub">No completed Quests.</div>'}
+  </div>`
+}
+
 function hierarchyBack(){
   const r=state.hierarchyReturn;
   state.hierarchyReturn=null;
@@ -1074,19 +1118,22 @@ function openHierarchyDetail(type,id,returnType=null,returnId=null){
   if(!obj)return;
   const chapter=type==='sub'?state.chapterQuests.find(c=>c.id===obj.chapterId):obj;
   const subs=type==='chapter'?orderedSubs(id):[];
-  const activeQuests=type==='sub'?state.quests.filter(q=>q.parentSubQuestId===id).sort(activeQuestSort):[];
+  const allSubQuests=type==='sub'?state.quests.filter(q=>q.parentSubQuestId===id).sort(activeQuestSort):[];
+  const activeQuests=allSubQuests.filter(q=>!q.completed);
+  const completedQuests=allSubQuests.filter(q=>q.completed);
   const heading=type==='chapter'?`${esc(obj.title)} - ${esc(obj.archetype)}`:`${esc(obj.title)} - ${esc(obj.rarity||'Common')}`;
-  app().innerHTML=`<div class="screen"><h2>${heading}</h2>
+  renderDirect(`<div class="screen"><h2>${heading}</h2>
     <div class="row" style="align-items:stretch"><div class="detail-field" style="flex:1;margin-top:0"><b>Cornerstone</b>${esc(chapter?.cornerstone||'—')}</div><div class="detail-field" style="flex:1;margin-top:0"><b>Quest Type</b>${type==='chapter'?'Chapter Quest':'Sub-Quest'}</div></div>
     ${type==='sub'?`<div class="detail-field"><b>Chapter Quest</b>${esc(chapter?.title||'—')}</div>`:''}
     <div class="detail-field"><b>Description</b>${esc(obj.description||'—')}</div>
     ${type==='chapter'?`<div class="between" style="margin-top:18px"><h3 style="margin:0">Sub-Quests</h3><button class="btn" style="width:auto;margin:0" onclick="openCreateSubQuest('${id}')">＋ Sub-Quest</button></div>
       <div style="margin-top:10px">${subs.length?subs.map(s=>`<div class="card" draggable="true" ondragstart="subDragStart(event,'${s.id}')" ondragover="event.preventDefault()" ondrop="subDropOnChapter(event,'${s.id}','${id}')" onclick="openHierarchyDetail('sub','${s.id}','chapter','${id}')"><div class="between"><span><span class="drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">≡</span> <strong>${esc(s.title)}</strong></span><span class="badge">${esc(s.rarity||'Common')}</span></div><div class="progress"><div style="width:${subQuestProgress(s.id).pct}%"></div></div><div class="sub small">${subQuestProgress(s.id).done}/${subQuestProgress(s.id).total} Active Quests complete</div></div>`).join(''):'<div class="card sub">No Sub-Quests yet.</div>'}</div>`:
       `<div class="between" style="margin-top:18px"><h3 style="margin:0">Active Quests</h3><button class="btn" style="width:auto;margin:0" onclick="openCreateActiveQuest('${id}')">＋ Active Quest</button></div>
-      <div style="margin-top:10px">${activeQuests.length?activeQuests.map(q=>`<div class="card ${q.completed?'completed':''}" onclick="openHierarchyDetail('quest','${q.id}')"><div class="between"><strong>${esc(q.title)}</strong><span>${q.completed?'Completed':'Active'}</span></div><div class="sub small">Active Quest · ${starDisplay(q.stars,q.earnedStars||0,q.completed)}</div></div>`).join(''):'<div class="card sub">No Active Quests yet.</div>'}</div>`}
+      <div style="margin-top:10px">${activeQuests.length?activeQuests.map(q=>`<div class="card" onclick="openHierarchyDetail('quest','${q.id}')"><div class="between"><strong>${esc(q.title)}</strong><span>Active</span></div><div class="sub small">Active Quest · ${starDisplay(q.stars,q.earnedStars||0,false)}</div></div>`).join(''):'<div class="card sub">No Active Quests yet.</div>'}
+      ${completedQuests.length?`<div class="card quest-card" style="margin-top:12px" onclick="openCompletedQuestFolder('${id}')"><div class="between"><strong>📁 Completed Quests</strong><span>${completedQuests.length}</span></div><div class="sub small">View completed Active Quests</div></div>`:''}</div>`}
     <button class="btn" onclick="${type==='chapter'?`editChapterQuest('${id}')`:`editSubQuest('${id}')`}">Edit Quest</button>
     <button class="btn primary" onclick="alert('Chapter/Sub-Quest completion will use the universal completion survey.')">Complete Quest</button>
-    <button class="btn ghost" onclick="hierarchyBack()">Back</button></div>`;
+    </div>`);
 }
 function createChapter(){
   const d=state.placedCornerstone?.name||'',opts=ARCH[d]||[];
@@ -1151,7 +1198,7 @@ function updateChapterProgress(subId){
 function menu(){return `<div class="screen"><h2>Menu</h2><div class="card"><button class="btn" onclick="go('home')">Return to Settlement</button><button class="btn ghost" onclick="if(confirm('Reset all prototype progress and start over?'))reset()">Reset Prototype / Start Over</button></div></div>`}
 
 function render(){
-  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,editCompletion,createMenu,createQuestMenu,createBuildingMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,routineFolder,bulkResolve,extendQuest,menu};
+  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,editCompletion,createMenu,createQuestMenu,createBuildingMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,routineFolder,completedQuestFolder,bulkResolve,extendQuest,menu};
   const page=(map[state.screen]||home)();
   app().innerHTML=page+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());
 }
