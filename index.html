@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4U</title>
+<title>Life Quest Prototype v4U.1 Navigation Hotfix</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -11,8 +11,8 @@
 }
 *{box-sizing:border-box}
 body{margin:0;background:#080b0f;color:var(--text);font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;display:flex;justify-content:center}
-#app{width:min(100vw,430px);min-height:100vh;background:linear-gradient(#10161d,#0d1218);position:relative;overflow:hidden;box-shadow:0 0 50px #000}
-.screen{min-height:100vh;padding:22px 18px 92px}
+#app{width:min(100vw,430px);height:100vh;height:100dvh;background:linear-gradient(#10161d,#0d1218);position:relative;overflow:hidden;box-shadow:0 0 50px #000}
+.screen{height:100vh;height:100dvh;overflow-y:auto;padding:22px 18px calc(96px + env(safe-area-inset-bottom));overscroll-behavior:contain}
 .center{display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
 h1,h2,h3,p{margin-top:0}
 h2{font-size:24px}
@@ -53,7 +53,7 @@ textarea{min-height:86px}
 .focus{position:absolute;left:50%;top:64%;transform:translateX(-50%);width:88px;height:56px;border-radius:30px;background:#f6c85a;color:#221700;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:900;font-size:28px;border:3px solid #fff2bc;box-shadow:0 8px 24px #0008;cursor:pointer;z-index:8}
 .focus.pulse{animation:pulse 1.35s infinite}
 @keyframes pulse{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.06)}}
-.bottom{position:absolute;left:0;right:0;bottom:0;display:grid;grid-template-columns:1fr 1.2fr 1fr 1fr;gap:7px;padding:9px 10px 14px;background:#0d1218f2;border-top:1px solid var(--line);z-index:12}
+.bottom{position:fixed;left:50%;transform:translateX(-50%);width:min(100vw,430px);bottom:0;display:grid;grid-template-columns:1fr 1.2fr 1fr 1fr;gap:7px;padding:9px 10px calc(14px + env(safe-area-inset-bottom));background:#0d1218f2;border-top:1px solid var(--line);z-index:9999}
 .nav{min-height:52px;border:1px solid var(--line);background:#18202a;color:var(--text);border-radius:12px;font-size:12px;font-weight:750}
 .nav.add{background:#30435a}
 .hexring{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:360px;height:360px;pointer-events:none}
@@ -635,7 +635,7 @@ function questDetail(){
     ${q.kind!=='tutorial'&&instances.length>1?`<div class="history-block"><div class="sub small">Quest History</div>${instances.map((h,i)=>`<div class="sub small">${i===0?'Complete task':'Reopened to finish remaining work'} — earned ${'★'.repeat(h.earnedStars||0)}${'☆'.repeat(Math.max(0,(h.stars||0)-(h.earnedStars||0)))}</div>`).join('')}<div class="sub small">Total: ${'★'.repeat(cumulative)}${'☆'.repeat(Math.max(0,viewed.stars-cumulative))}</div></div>`:''}
     <div class="sticky-actions">
       <button class="btn primary" ${canComplete||viewed.completed?'':'disabled'} ${viewed.completed?'disabled':''} onclick="state.currentQuest={kind:'quest',...getQuest('${viewed.id}')};state.resolutionStars=${viewed.rootQuestId?`getQuest('${viewed.id}').earnedStars||0`:'0'};go('resolve')">Complete Quest</button>
-      <button class="btn" ${q.kind==='tutorial'?'disabled':''} onclick="renderDirect(questEditor('edit','${viewed.id}'))">${isOverdue?'Extend Quest':'Edit Quest'}</button>
+      <button class="btn" ${q.kind==='tutorial'?'disabled':''} onclick="renderDirect(questEditor('edit','${viewed.id}'))">${isOverdue?'Extend Quest':'Edit Quest'}</button><button class="btn ghost" onclick="navBack()">Back</button><!-- Navigation fallback -->
       
     </div></div>`;
 }
