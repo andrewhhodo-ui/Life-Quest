@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4U.2 Redundant Navigation Hotfix</title>
+<title>Life Quest Prototype v4U.3 Action Layout Hotfix</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -114,6 +114,12 @@ textarea{min-height:86px}
   padding-bottom:calc(190px + env(safe-area-inset-bottom)) !important;
 }
 
+</style>
+
+<style id="v4u3-hotfix">
+.sticky-actions{position:static!important;bottom:auto!important;z-index:auto!important;background:transparent!important;padding:0!important;margin:14px 0 0!important;border-top:0!important;width:100%!important;left:auto!important;right:auto!important;transform:none!important}
+.sticky-actions .btn{display:block!important;width:100%!important;margin-left:auto!important;margin-right:auto!important}
+.screen.with-sticky{padding-bottom:calc(110px + env(safe-area-inset-bottom))!important}
 </style>
 </head>
 <body>
