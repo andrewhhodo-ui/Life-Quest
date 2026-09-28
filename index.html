@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4U.1 Navigation Hotfix</title>
+<title>Life Quest Prototype v4U.2 Redundant Navigation Hotfix</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -99,6 +99,21 @@ textarea{min-height:86px}
 .instance-tab.active{background:var(--accent);color:#221700}
 .inline-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .day-picker{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.day-dot{width:34px;height:34px;border-radius:50%;border:1px solid #667085;background:#20242c;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer}.day-dot.selected{background:#f2c94c;color:#171717;border-color:#f2c94c;font-weight:700}.routine-row.completed{opacity:.62}.routine-date{font-weight:700}.check-row{display:flex;align-items:center;gap:10px}.check-row input{width:20px;height:20px}
+
+/* v4U.2 redundancy hotfix: local Quest actions + global navigation coexist */
+.sticky-actions{
+  position:sticky !important;
+  bottom:74px !important;
+  z-index:5000 !important;
+  background:#0d1218f7 !important;
+  padding:8px 0 10px !important;
+  margin-top:12px !important;
+  border-top:1px solid var(--line) !important;
+}
+.screen.with-sticky{
+  padding-bottom:calc(190px + env(safe-area-inset-bottom)) !important;
+}
+
 </style>
 </head>
 <body>
