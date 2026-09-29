@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4U.3 Action Layout Hotfix</title>
+<title>Life Quest Prototype v4W Stability + Training Grounds</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -114,6 +114,10 @@ textarea{min-height:86px}
   padding-bottom:calc(190px + env(safe-area-inset-bottom)) !important;
 }
 
+
+.training-indicator{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;width:min(calc(100vw - 24px),406px);z-index:9000;background:#17212b;border:1px solid var(--line);border-radius:12px;padding:9px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.training-indicator strong{font-size:13px}.training-indicator .sub{font-size:11px}
+.training-scene{text-align:center;font-size:48px;padding:18px 8px;min-height:92px}
 </style>
 
 <style id="v4u3-hotfix">
@@ -140,7 +144,7 @@ const DEFAULT={
   questTab:'all',
   chapterQuests:[],subQuests:[],
   constructionReadyAt:null,constructionStage:0,
-  selectedHex:null,placedCornerstones:[],helpSeen:{chapter:false,rarity:false},detailReturn:'home',
+  selectedHex:null,placedCornerstones:[],placedBuildings:[],pendingBuilding:null,training:null,hierarchyView:null,completionReturn:null,helpSeen:{chapter:false,rarity:false},detailReturn:'home',
   focusChapterId:null,focusTab:'due',movingCornerstone:null,chapterCollapsed:{},questLogFolder:null,
   requirements:{
     freeQuestCreated:false,freeQuestCompleted:false,
@@ -157,6 +161,7 @@ state.chapterQuests=Array.isArray(state.chapterQuests)?state.chapterQuests:[];
 state.subQuests=Array.isArray(state.subQuests)?state.subQuests:[];
 state.requirements=Object.assign({},DEFAULT.requirements,state.requirements||{});
 state.placedCornerstones=Array.isArray(state.placedCornerstones)?state.placedCornerstones:[];
+state.placedBuildings=Array.isArray(state.placedBuildings)?state.placedBuildings:[];
 if(state.placedCornerstone&&state.placedCornerstone.hex!=null&&!state.placedCornerstones.length)state.placedCornerstones=[state.placedCornerstone];
 state.helpSeen=Object.assign({chapter:false,rarity:false},state.helpSeen||{});
 state.chapterCollapsed=state.chapterCollapsed||{};
@@ -183,10 +188,24 @@ state.tutorialQuests.forEach(q=>{q.completed=true});
 save();
 
 function save(){localStorage.setItem(SAVE_KEY,JSON.stringify(state))}
+function navSnapshot(screen=state.screen){
+  return {screen,questLogFolder:state.questLogFolder?{...state.questLogFolder}:null,focusTab:state.focusTab,questSearch:state.questSearch,questTab:state.questTab,questLogView:state.questLogView,routineSeriesId:state.routineSeriesId,hierarchyView:state.hierarchyView?{...state.hierarchyView}:null,selectedHex:state.selectedHex};
+}
+function restoreSnapshot(h){
+  state.screen=h?.screen||'home';
+  state.questLogFolder=h?.questLogFolder||null;
+  if(h?.focusTab!=null)state.focusTab=h.focusTab;
+  if(h?.questSearch!=null)state.questSearch=h.questSearch;
+  if(h?.questTab!=null)state.questTab=h.questTab;
+  if(h?.questLogView!=null)state.questLogView=h.questLogView;
+  if(h?.routineSeriesId!=null)state.routineSeriesId=h.routineSeriesId;
+  state.hierarchyView=h?.hierarchyView||null;
+  if(h?.selectedHex!=null)state.selectedHex=h.selectedHex;
+}
 function go(screen,opts={}){
   if(!opts.noHistory&&state.screen&&state.screen!==screen){
     state.navHistory=state.navHistory||[];
-    state.navHistory.push({screen:state.screen,questLogFolder:state.questLogFolder?{...state.questLogFolder}:null,focusTab:state.focusTab,questSearch:state.questSearch,questTab:state.questTab,questLogView:state.questLogView,routineSeriesId:state.routineSeriesId});
+    state.navHistory.push(navSnapshot());
     if(state.navHistory.length>40)state.navHistory.shift();
   }
   state.screen=screen;save();render()
@@ -195,14 +214,7 @@ function navHome(){state.navHistory=[];state.screen='home';save();render()}
 function navBack(){
   const h=(state.navHistory||[]).pop();
   if(!h){state.screen='home';save();render();return}
-  state.screen=h.screen||'home';
-  state.questLogFolder=h.questLogFolder||null;
-  if(h.focusTab!=null)state.focusTab=h.focusTab;
-  if(h.questSearch!=null)state.questSearch=h.questSearch;
-  if(h.questTab!=null)state.questTab=h.questTab;
-  if(h.questLogView!=null)state.questLogView=h.questLogView;
-  if(h.routineSeriesId!=null)state.routineSeriesId=h.routineSeriesId;
-  save();render()
+  restoreSnapshot(h);save();render()
 }
 function persistentNav(){
   if(state.screen==='home')return `<div class="bottom">
@@ -219,7 +231,7 @@ function persistentNav(){
   </div>`
 }
 function renderDirect(html){
-  app().innerHTML=html+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());
+  app().innerHTML=html+trainingIndicator()+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());startTrainingTicker();
 }
 function reset(){localStorage.removeItem(SAVE_KEY);state=JSON.parse(JSON.stringify(DEFAULT));render()}
 function app(){return document.getElementById('app')}
@@ -246,8 +258,10 @@ function addRewards(stars){state.xp+=stars*5;state.coins+=stars*5;evaluateLevel(
 function getQuest(id){return state.quests.find(q=>q.id===id)}
 function getTutorial(id){return state.tutorialQuests.find(q=>q.id===id)}
 function cornerAt(i){return state.placedCornerstones.find(c=>c.hex===i)}
+function buildingAt(i){return state.placedBuildings.find(b=>b.hex===i)}
+function occupiedAt(i){return cornerAt(i)||buildingAt(i)}
 function unlockedHexIds(){return state.outerRingUnlocked?Array.from({length:18},(_,i)=>i):[0,1,2,3,4,5]}
-function emptyHexes(){return unlockedHexIds().filter(i=>!cornerAt(i))}
+function emptyHexes(){return unlockedHexIds().filter(i=>!occupiedAt(i))}
 function canPlaceCornerstone(){const standardNames=new Set(CORNERS?.map?.(o=>o[1])||[]),placed=new Set(state.placedCornerstones.map(c=>c.name));return state.cornerstoneUnlocked&&emptyHexes().length>0&&[...standardNames].some(n=>!placed.has(n))}
 function axialRing(radius){
   const dirs=[[1,0],[0,1],[-1,1],[-1,0],[0,-1],[1,-1]];
@@ -455,10 +469,19 @@ function questDeadline(q){
   if(!q.timeLimitDate)return null;
   const t=q.timeLimitTime||'23:59';const d=new Date(`${q.timeLimitDate}T${t}:00`);return isNaN(d)?null:d;
 }
-function dueSoonQuests(){
-  const now=new Date(),limit=new Date(now.getTime()+3*24*60*60*1000);
-  return state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d&&x.d<=limit).sort((a,b)=>a.d-b.d).slice(0,2).map(x=>x.q);
+function dueSoonWindow(){
+  const now=new Date();
+  const eligible=state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d);
+  const overdue=eligible.filter(x=>x.d<now);
+  if(overdue.length)return {days:3,items:overdue.sort((a,b)=>a.d-b.d).slice(0,2)};
+  for(const days of [3,5,7]){
+    const limit=new Date(now.getTime()+days*86400000);
+    const items=eligible.filter(x=>x.d>=now&&x.d<=limit).sort((a,b)=>a.d-b.d);
+    if(items.length)return {days,items:items.slice(0,2)};
+  }
+  return {days:7,items:[]};
 }
+function dueSoonQuests(){return dueSoonWindow().items.map(x=>x.q)}
 function focusChapterQuests(){
   if(!state.focusChapterId)return [];
   const subs=new Set(state.subQuests.filter(s=>s.chapterId===state.focusChapterId).map(s=>s.id));
@@ -534,7 +557,7 @@ function focusView(){
   let body='';
   if(tab==='focus')body=chapter?`<div class="card"><div class="between"><div><strong>${esc(chapter.title)}</strong><div class="sub small">${esc(chapter.cornerstone)}</div></div><button class="btn" style="width:auto;margin:0" onclick="openHierarchyDetail('chapter','${chapter.id}')">Open Chapter</button></div></div>${fq.length?fq.map(focusQuestCard).join(''):'<div class="focus-empty">No non-repeatable Active Quests are waiting here.</div>'}<button class="btn primary" onclick="${state.subQuests.some(s=>s.chapterId===chapter.id)?`openCreateActiveQuest('${state.subQuests.find(s=>s.chapterId===chapter.id).id}')`:`openHierarchyDetail('chapter','${chapter.id}')`}">＋ Active Quest</button><button class="btn" onclick="go('focusChoose')">Change Focus Quest</button>`:`<div class="focus-empty">Choose a Chapter Quest to make it your Focus.</div><button class="btn primary" onclick="go('focusChoose')">Choose Focus Quest</button>`;
   else if(tab==='daily')body=`${daily.length?daily.map(dailyCard).join(''):'<div class="focus-empty">No recurring Quests scheduled for today.</div>'}<button class="btn" onclick="state.questLogFolder={kind:'recurring'};go('questList')">View All Recurring Quests</button>`;
-  else body=`${due.length?due.map(focusQuestCard).join(''):'<div class="focus-empty">Nothing due in the next 3 days.</div>'}${(()=>{const c=dueSummaryCounts();return `<div class="due-summary" onclick="go('dueList')">${c.overdue?c.overdue+' overdue · ':''}${c.dueToday?c.dueToday+' due today · ':''}${c.next3} due in next 3 days</div>`})()}`;
+  else body=`${due.length?due.map(focusQuestCard).join(''):`<div class="focus-empty">Nothing due in the next ${dueSoonWindow().days} days.</div>`}${(()=>{const w=dueSoonWindow(),c=dueSummaryCounts();return `<div class="due-summary" onclick="go('dueList')">${c.overdue?c.overdue+' overdue · ':''}${c.dueToday?c.dueToday+' due today · ':''}${w.items.filter(x=>x.d>=new Date()).length} upcoming within ${w.days} days</div>`})()}`;
   return `<div class="screen focus-panel"><h2>Focus</h2><div class="tabs"><button class="tab ${tab==='due'?'active':''}" onclick="setFocusTab('due')">Due Soon</button><button class="tab ${tab==='focus'?'active':''}" onclick="setFocusTab('focus')">Focus</button><button class="tab ${tab==='daily'?'active':''}" onclick="setFocusTab('daily')">Daily</button></div>${body}</div>`;
 }
 function openRoutineFolder(seriesId){state.routineSeriesId=seriesId;state.bulkSelected=[];save();go('routineFolder')}
@@ -546,7 +569,7 @@ function toggleSelectAllRoutine(){const boxes=[...document.querySelectorAll('.ro
 function beginBulkResolve(sid){const ids=[...document.querySelectorAll('.routine-check:checked')].map(x=>x.value);if(!ids.length){alert('Select at least one Quest.');return}state.bulkSelected=ids;state.routineSeriesId=sid;state.resolutionStars=0;save();go('bulkResolve')}
 function bulkResolve(){const qs=(state.bulkSelected||[]).map(getQuest).filter(Boolean);if(!qs.length)return `<div class="screen"><h2>Resolve Selected</h2><div class="focus-empty">No Quests selected.</div><button class="btn ghost" onclick="go('routineFolder')">Back</button></div>`;const max=qs[0].stars||1;return `<div class="screen"><h2>Resolve Selected</h2><div class="card"><h3>${qs.length} occurrences</h3><p class="sub">One result will be applied to every selected Quest.</p><div class="stars">${Array.from({length:max},(_,i)=>i+1).map(n=>`<span class="star ${state.resolutionStars>=n?'gold':'empty'}" onclick="setBulkResolution(${n})">★</span>`).join('')}</div><div class="star-label">${state.resolutionStars} of ${max} Stars each</div><p class="sub small">0 stars records selected occurrences as missed/resolved.</p></div><button class="btn primary" onclick="submitBulkResolution()">Resolve ${qs.length} Quests</button><button class="btn ghost" onclick="go('routineFolder')">Back</button></div>`}
 function setBulkResolution(n){state.resolutionStars=state.resolutionStars===n?0:n;save();render()}
-function submitBulkResolution(){const earned=state.resolutionStars;(state.bulkSelected||[]).forEach(id=>{const q=getQuest(id);if(q&&!q.completed){q.completed=true;q.earnedStars=Math.min(earned,q.stars||earned);q.completedAt=new Date().toISOString();q.resolvedMissed=q.earnedStars===0;addRewards(q.earnedStars);}});state.bulkSelected=[];state.resolutionStars=0;save();go('routineFolder')}
+function submitBulkResolution(){const earned=state.resolutionStars;(state.bulkSelected||[]).forEach(id=>{const q=getQuest(id);if(q&&!q.completed){q.completed=true;q.earnedStars=Math.min(earned,q.stars||earned);q.completedAt=new Date().toISOString();q.resolvedMissed=q.earnedStars===0;addRewards(q.earnedStars);}});state.bulkSelected=[];state.resolutionStars=0;state.navHistory=(state.navHistory||[]).filter(h=>h.screen!=='bulkResolve');state.screen='routineFolder';save();render()}
 
 function focusChoose(){
   const active=state.chapterQuests;
@@ -561,8 +584,8 @@ function home(){
   if(state.constructionReadyAt&&Date.now()>=state.constructionReadyAt&&state.constructionStage===0){state.constructionStage=1;save();toast='<div class="toast">🏗️ Stage 1 construction has begun.</div>'}
   else if(state.constructionReadyAt&&state.constructionStage===0){const m=Math.max(1,Math.ceil((state.constructionReadyAt-Date.now())/60000));toast=`<div class="toast">🏗️ Construction begins in ${m} min</div>`}
   return `<div class="settlement">${hud()}<div class="world">
-    <div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),p=hexPos(h.q,h.r);return `<div class="hex ${state.innerRingUnlocked?'':'fog'}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${state.innerRingUnlocked?(c?`openCornerstone(${h.id})`:`selectEmptyHex(${h.id})`):''}">${c?c.icon:''}</div>`}).join('')}</div>
-    ${state.selectedHex!=null&&!cornerAt(state.selectedHex)?`<div class="hex-action"><button class="btn primary" onclick="beginCornerstoneFromHex()">＋ Place Cornerstone</button></div>`:''}
+    <div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),b=buildingAt(h.id),p=hexPos(h.q,h.r);return `<div class="hex ${state.innerRingUnlocked?'':'fog'}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${state.innerRingUnlocked?(c?`openCornerstone(${h.id})`:(b?`openBuilding(${h.id})`:`selectEmptyHex(${h.id})`)):''}">${c?c.icon:(b?b.icon:'')}</div>`}).join('')}</div>
+    ${state.selectedHex!=null&&!occupiedAt(state.selectedHex)?`<div class="hex-action"><button class="btn primary" onclick="beginCornerstoneFromHex()">＋ Place Cornerstone</button></div>`:''}
     ${state.firstHomeReadyAt&&!state.firstHomeUpgraded?`<div class="build-bubble" style="left:50%;top:42%">🏗️ ${Math.max(1,Math.ceil((state.firstHomeReadyAt-Date.now())/60000))}m</div>`:''}
     ${state.constructionReadyAt&&state.placedCornerstones.length?`<div class="build-bubble" style="left:50%;top:45%">🏗️ ${state.constructionStage?'Stage 1':Math.max(1,Math.ceil((state.constructionReadyAt-Date.now())/60000))+'m'}</div>`:''}
     <div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div>
@@ -695,14 +718,72 @@ function submitResolution(){
       }
     }
   }
-  state.currentQuest=null;state.resolutionStars=0;syncTutorial();save();go('reward');
+  state.currentQuest=null;state.resolutionStars=0;syncTutorial();
+  const hist=(state.navHistory||[]).filter(h=>!['resolve','reward','questDetail'].includes(h.screen));
+  state.completionReturn=hist.length?hist[hist.length-1]:{screen:'home'};
+  state.navHistory=hist.slice(0,-1);
+  state.screen='reward';save();render();
 }
-function reward(){return `<div class="screen center"><div style="font-size:50px">✨</div><h2>Quest Resolved</h2><p class="sub">XP and coins were added.</p><button class="btn primary" onclick="go('home')">Return Home</button></div>`}
+function finishResolution(){const h=state.completionReturn||{screen:'home'};state.completionReturn=null;restoreSnapshot(h);save();render()}
+function reward(){return `<div class="screen center"><div style="font-size:50px">✨</div><h2>Quest Resolved</h2><p class="sub">XP and coins were added.</p><button class="btn primary" onclick="finishResolution()">Continue</button></div>`}
 
 function createMenu(){return `<div class="screen"><h2>Create</h2><div class="card"><button class="btn primary" onclick="go('createQuestMenu')">＋ Quest</button><button class="btn" onclick="go('createBuildingMenu')">＋ Building</button></div></div>`;}
 function createQuestMenu(){return `<div class="screen"><h2>Create Quest</h2><div class="card"><button class="btn primary" onclick="state.editorDefaults={questType:'Free Quest'};go('createQuest')">＋ Free Quest</button><button class="btn" ${state.requirements.cornerstonePlaced?'':'disabled'} onclick="go('createChapter')">＋ Chapter Quest ${state.requirements.cornerstonePlaced?'':'🔒'}</button><button class="btn" onclick="state.subQuestDefaults=null;go('createSubQuest')">＋ Sub-Quest</button><button class="btn" ${state.subQuests.length?'':'disabled'} onclick="state.editorDefaults={questType:'Cornerstone Quest',cornerstone:'Free Quest'};go('createQuest')">＋ Active Quest ${state.subQuests.length?'':'🔒'}</button></div><button class="btn ghost" onclick="go('createMenu')">Back</button></div>`;}
-function createBuildingMenu(){const canCorner=canPlaceCornerstone();return `<div class="screen"><h2>Create Building</h2><div class="card"><button class="btn primary" ${canCorner?'':'disabled'} onclick="go('cornerstonePick')">＋ Cornerstone ${canCorner?'':'🔒'}</button><button class="btn" disabled>Reward Shop 🔒</button></div><button class="btn ghost" onclick="go('createMenu')">Back</button></div>`;}
+function createBuildingMenu(){const canCorner=canPlaceCornerstone(),hasTraining=state.placedBuildings.some(b=>b.type==='training');return `<div class="screen"><h2>Create Building</h2><div class="card"><button class="btn primary" ${canCorner?'':'disabled'} onclick="go('cornerstonePick')">＋ Cornerstone ${canCorner?'':'🔒'}</button><button class="btn" onclick="${hasTraining?'openTrainingGrounds()':"beginBuildingPlacement('training')"}">${hasTraining?'⚔️ Open Training Grounds':'＋ Training Grounds'}</button><button class="btn" disabled>Reward Shop 🔒 · Level TBD</button><button class="btn" disabled>Arcade 🔒 · Level TBD</button><button class="btn" disabled>Chronicle 🔒 · Level TBD</button></div><div class="sub small">Unlock order: Training Grounds → Reward Shop → Arcade → Chronicle.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;}
 
+
+const BUILDING_TYPES={training:{name:'Training Grounds',icon:'⚔️'}};
+function beginBuildingPlacement(type){
+  if(type==='training'&&state.placedBuildings.some(b=>b.type==='training')){openTrainingGrounds();return}
+  if(!emptyHexes().length){alert('There are no empty unlocked hexes available.');return}
+  state.pendingBuilding=type;save();go('placeBuilding');
+}
+function placeBuilding(){
+  const def=BUILDING_TYPES[state.pendingBuilding];if(!def)return `<div class="screen"><h2>Building</h2><p class="sub">No building selected.</p></div>`;
+  return `<div class="settlement">${hud()}<div class="world"><div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),b=buildingAt(h.id),p=hexPos(h.q,h.r),open=!c&&!b&&unlockedHexIds().includes(h.id);return `<div class="hex ${open?'selectable':'fog'}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${open?`commitBuilding(${h.id})`:''}">${c?c.icon:(b?b.icon:(open?'＋':''))}</div>`}).join('')}</div><div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div></div><div class="toast">Tap an empty unlocked hex to build ${esc(def.name)}.</div><div class="hex-action" style="top:auto;bottom:154px"><button class="btn ghost" onclick="navBack()">Cancel</button></div></div>`;
+}
+function commitBuilding(hex){
+  const type=state.pendingBuilding,def=BUILDING_TYPES[type];if(!def||occupiedAt(hex))return;
+  state.placedBuildings.push({id:'b-'+Date.now(),type,name:def.name,icon:def.icon,hex,createdAt:new Date().toISOString()});
+  state.pendingBuilding=null;state.selectedHex=null;save();openTrainingGrounds();
+}
+function openBuilding(hex){const b=buildingAt(hex);if(b?.type==='training')openTrainingGrounds()}
+function openTrainingGrounds(){syncTraining();go('trainingGrounds')}
+function defaultTraining(){return {running:false,phase:'active',activeMin:25,breakMin:5,cycles:4,cycle:1,activity:'adventure',phaseStartedAt:null,phaseEndsAt:null,pausedRemaining:25*60};}
+function getTraining(){if(!state.training)state.training=defaultTraining();return state.training}
+function trainingDuration(t){return (t.phase==='active'?t.activeMin:t.breakMin)*60}
+function trainingRemaining(t=getTraining()){if(t.running&&t.phaseEndsAt)return Math.max(0,Math.ceil((t.phaseEndsAt-Date.now())/1000));return Math.max(0,t.pausedRemaining??trainingDuration(t))}
+function syncTraining(){
+  const t=getTraining();if(!t.running||!t.phaseEndsAt)return t;
+  let now=Date.now(),guard=0;
+  while(t.running&&now>=t.phaseEndsAt&&guard++<100){
+    if(t.phase==='active'){t.phase='break';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.breakMin*60000}
+    else if(t.cycle<t.cycles){t.cycle++;t.phase='active';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.activeMin*60000}
+    else{t.running=false;t.pausedRemaining=0;t.phaseEndsAt=null;t.phaseStartedAt=null}
+  }
+  save();return t;
+}
+function trainingLabel(a){return ({computer:'Computer Work',study:'Study / Read',running:'Running / Exercise',adventure:'Adventure'})[a]||'Adventure'}
+function trainingScene(t){if(t.activity==='computer')return t.phase==='active'?'🧑‍💻':'☕ 🧑';if(t.activity==='study')return t.phase==='active'?'🧑 📖':'☕ 🧑';if(t.activity==='running')return t.phase==='active'?'🏃 · · 🌲':'🧘 💧';return t.phase==='active'?'🛡️ 🧙 ⚔️ 👾':'⛺ 🧙 ❤️‍🩹'}
+function timerText(sec){sec=Math.max(0,Math.floor(sec));return `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`}
+function trainingGrounds(){
+  const t=syncTraining(),r=trainingRemaining(t);
+  return `<div class="screen"><h2>⚔️ Training Grounds</h2><div class="card"><div class="inline-grid"><div class="field"><label>Active</label><input id="trainActive" type="number" min="1" max="240" value="${t.activeMin}" ${t.running?'disabled':''}></div><div class="field"><label>Break</label><input id="trainBreak" type="number" min="1" max="120" value="${t.breakMin}" ${t.running?'disabled':''}></div></div><div class="inline-grid"><div class="field"><label>Cycles</label><input id="trainCycles" type="number" min="1" max="20" value="${t.cycles}" ${t.running?'disabled':''}></div><div class="field"><label>Activity</label><select id="trainActivity" ${t.running?'disabled':''}><option value="computer" ${t.activity==='computer'?'selected':''}>Computer Work</option><option value="study" ${t.activity==='study'?'selected':''}>Study / Read</option><option value="running" ${t.activity==='running'?'selected':''}>Running / Exercise</option><option value="adventure" ${t.activity==='adventure'?'selected':''}>Adventure</option></select></div></div></div><div class="card center"><div class="sub" id="trainPhase">${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}</div><div id="trainClock" style="font-size:46px;font-weight:800;letter-spacing:2px;margin:8px 0">${timerText(r)}</div><div class="training-scene" id="trainScene">${trainingScene(t)}</div><div class="sub small">${esc(trainingLabel(t.activity))}${t.activity==='adventure'?' · cosmetic preview':''}</div></div><button class="btn primary" onclick="${t.running?'pauseTraining()':'startTraining()'}">${t.running?'Pause':'Start / Resume'}</button><button class="btn" onclick="resetTraining()">Reset / End Session</button><div class="sub small">Timer activity is cosmetic. Training Grounds does not award Stars, XP, Coins, or complete Quests.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;
+}
+function readTrainingSetup(){
+  const t=getTraining();t.activeMin=Math.max(1,Math.min(240,parseInt(document.getElementById('trainActive')?.value||t.activeMin)||25));t.breakMin=Math.max(1,Math.min(120,parseInt(document.getElementById('trainBreak')?.value||t.breakMin)||5));t.cycles=Math.max(1,Math.min(20,parseInt(document.getElementById('trainCycles')?.value||t.cycles)||4));t.activity=document.getElementById('trainActivity')?.value||t.activity;
+}
+function startTraining(){const t=getTraining();if(!t.running){readTrainingSetup();const r=t.pausedRemaining>0?t.pausedRemaining:trainingDuration(t);t.running=true;t.phaseStartedAt=Date.now();t.phaseEndsAt=Date.now()+r*1000;save();render();startTrainingTicker()}}
+function pauseTraining(){const t=syncTraining();t.pausedRemaining=trainingRemaining(t);t.running=false;t.phaseEndsAt=null;t.phaseStartedAt=null;save();render()}
+function resetTraining(){state.training=defaultTraining();save();render()}
+let trainingTicker=null;
+function startTrainingTicker(){clearInterval(trainingTicker);trainingTicker=setInterval(()=>{const t=syncTraining();if(!t.running){clearInterval(trainingTicker);trainingTicker=null}if(state.screen==='trainingGrounds')updateTrainingDOM();else updateTrainingIndicator()},1000)}
+function updateTrainingDOM(){const t=syncTraining(),c=document.getElementById('trainClock'),p=document.getElementById('trainPhase'),sc=document.getElementById('trainScene');if(c)c.textContent=timerText(trainingRemaining(t));if(p)p.textContent=`${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}`;if(sc)sc.textContent=trainingScene(t)}
+function trainingIndicator(){
+  const t=syncTraining();if(!t.running||state.screen==='trainingGrounds')return '';
+  return `<div class="training-indicator" onclick="openTrainingGrounds()"><div><strong>⚔️ ${t.phase==='active'?'Active':'Break'} · <span id="trainingMiniClock">${timerText(trainingRemaining(t))}</span></strong><div class="sub">Cycle ${t.cycle} of ${t.cycles} · ${esc(trainingLabel(t.activity))}</div></div><span>›</span></div>`;
+}
+function updateTrainingIndicator(){const e=document.getElementById('trainingMiniClock');if(e)e.textContent=timerText(trainingRemaining())}
 function openCreateActiveQuest(subId){
   const sub=state.subQuests.find(s=>s.id===subId);const ch=sub&&state.chapterQuests.find(c=>c.id===sub.chapterId);if(!sub||!ch)return;
   state.editorDefaults={questType:'Cornerstone Quest',cornerstone:ch.cornerstone,chapterId:ch.id,subQuestId:sub.id,lockHierarchy:true,returnType:'sub',returnId:sub.id};save();go('createQuest');
@@ -1132,9 +1213,12 @@ function hierarchyBack(){
 function activeQuestSort(a,b){if(!!a.completed!==!!b.completed)return a.completed?1:-1;if(a.completed&&b.completed)return new Date(a.completedAt||0)-new Date(b.completedAt||0);const ad=questDeadline(a),bd=questDeadline(b);if(ad&&bd)return ad-bd;if(ad)return -1;if(bd)return 1;return new Date(a.createdAt||0)-new Date(b.createdAt||0)}
 function subDropOnChapter(ev,targetId,chapterId){subDrop(ev,targetId);openHierarchyDetail('chapter',chapterId)}
 function openHierarchyDetail(type,id,returnType=null,returnId=null){
-  if(returnType)state.hierarchyReturn={type:returnType,id:returnId};
-  else if(!state.hierarchyReturn)state.hierarchyReturn={screen:'cornerstoneLanding'};
-  if(type==='quest'){const q=getQuest(id);state.currentQuest={kind:'quest',...q};state.detailReturn='cornerstoneLanding';go('questDetail');return}
+  state.hierarchyView={type,id};
+  save();go('hierarchyDetail');
+}
+function hierarchyDetail(){
+  const type=state.hierarchyView?.type,id=state.hierarchyView?.id;
+  if(!type||!id)return home();
   const obj=type==='chapter'?state.chapterQuests.find(x=>x.id===id):state.subQuests.find(x=>x.id===id);
   if(!obj)return;
   const chapter=type==='sub'?state.chapterQuests.find(c=>c.id===obj.chapterId):obj;
@@ -1143,7 +1227,7 @@ function openHierarchyDetail(type,id,returnType=null,returnId=null){
   const activeQuests=allSubQuests.filter(q=>!q.completed);
   const completedQuests=allSubQuests.filter(q=>q.completed);
   const heading=type==='chapter'?`${esc(obj.title)} - ${esc(obj.archetype)}`:`${esc(obj.title)} - ${esc(obj.rarity||'Common')}`;
-  renderDirect(`<div class="screen"><h2>${heading}</h2>
+  return `<div class="screen"><h2>${heading}</h2>
     <div class="row" style="align-items:stretch"><div class="detail-field" style="flex:1;margin-top:0"><b>Cornerstone</b>${esc(chapter?.cornerstone||'—')}</div><div class="detail-field" style="flex:1;margin-top:0"><b>Quest Type</b>${type==='chapter'?'Chapter Quest':'Sub-Quest'}</div></div>
     ${type==='sub'?`<div class="detail-field"><b>Chapter Quest</b>${esc(chapter?.title||'—')}</div>`:''}
     <div class="detail-field"><b>Description</b>${esc(obj.description||'—')}</div>
@@ -1154,7 +1238,7 @@ function openHierarchyDetail(type,id,returnType=null,returnId=null){
       ${completedQuests.length?`<div class="card quest-card" style="margin-top:12px" onclick="openCompletedQuestFolder('${id}')"><div class="between"><strong>📁 Completed Quests</strong><span>${completedQuests.length}</span></div><div class="sub small">View completed Active Quests</div></div>`:''}</div>`}
     <button class="btn" onclick="${type==='chapter'?`editChapterQuest('${id}')`:`editSubQuest('${id}')`}">Edit Quest</button>
     <button class="btn primary" onclick="alert('Chapter/Sub-Quest completion will use the universal completion survey.')">Complete Quest</button>
-    </div>`);
+    </div>`;
 }
 function createChapter(){
   const d=state.placedCornerstone?.name||'',opts=ARCH[d]||[];
@@ -1219,9 +1303,9 @@ function updateChapterProgress(subId){
 function menu(){return `<div class="screen"><h2>Menu</h2><div class="card"><button class="btn" onclick="go('home')">Return to Settlement</button><button class="btn ghost" onclick="if(confirm('Reset all prototype progress and start over?'))reset()">Reset Prototype / Start Over</button></div></div>`}
 
 function render(){
-  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,editCompletion,createMenu,createQuestMenu,createBuildingMenu,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,routineFolder,completedQuestFolder,bulkResolve,extendQuest,menu};
+  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,editCompletion,createMenu,createQuestMenu,createBuildingMenu,placeBuilding,trainingGrounds,hierarchyDetail,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,routineFolder,completedQuestFolder,bulkResolve,extendQuest,menu};
   const page=(map[state.screen]||home)();
-  app().innerHTML=page+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());
+  app().innerHTML=page+trainingIndicator()+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());startTrainingTicker();
 }
 syncTutorial();
 render();
