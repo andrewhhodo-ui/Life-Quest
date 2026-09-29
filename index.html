@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4W Stability + Training Grounds</title>
+<title>Life Quest Prototype v4W.1 Quest Routing + Training Fix</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -749,7 +749,7 @@ function commitBuilding(hex){
 }
 function openBuilding(hex){const b=buildingAt(hex);if(b?.type==='training')openTrainingGrounds()}
 function openTrainingGrounds(){syncTraining();go('trainingGrounds')}
-function defaultTraining(){return {running:false,phase:'active',activeMin:25,breakMin:5,cycles:4,cycle:1,activity:'adventure',phaseStartedAt:null,phaseEndsAt:null,pausedRemaining:25*60};}
+function defaultTraining(){return {running:false,paused:false,phase:'active',activeMin:25,breakMin:5,cycles:4,cycle:1,activity:'adventure',phaseStartedAt:null,phaseEndsAt:null,pausedRemaining:25*60};}
 function getTraining(){if(!state.training)state.training=defaultTraining();return state.training}
 function trainingDuration(t){return (t.phase==='active'?t.activeMin:t.breakMin)*60}
 function trainingRemaining(t=getTraining()){if(t.running&&t.phaseEndsAt)return Math.max(0,Math.ceil((t.phaseEndsAt-Date.now())/1000));return Math.max(0,t.pausedRemaining??trainingDuration(t))}
@@ -759,7 +759,7 @@ function syncTraining(){
   while(t.running&&now>=t.phaseEndsAt&&guard++<100){
     if(t.phase==='active'){t.phase='break';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.breakMin*60000}
     else if(t.cycle<t.cycles){t.cycle++;t.phase='active';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.activeMin*60000}
-    else{t.running=false;t.pausedRemaining=0;t.phaseEndsAt=null;t.phaseStartedAt=null}
+    else{t.running=false;t.paused=false;t.pausedRemaining=0;t.phaseEndsAt=null;t.phaseStartedAt=null}
   }
   save();return t;
 }
@@ -768,13 +768,24 @@ function trainingScene(t){if(t.activity==='computer')return t.phase==='active'?'
 function timerText(sec){sec=Math.max(0,Math.floor(sec));return `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`}
 function trainingGrounds(){
   const t=syncTraining(),r=trainingRemaining(t);
-  return `<div class="screen"><h2>⚔️ Training Grounds</h2><div class="card"><div class="inline-grid"><div class="field"><label>Active</label><input id="trainActive" type="number" min="1" max="240" value="${t.activeMin}" ${t.running?'disabled':''}></div><div class="field"><label>Break</label><input id="trainBreak" type="number" min="1" max="120" value="${t.breakMin}" ${t.running?'disabled':''}></div></div><div class="inline-grid"><div class="field"><label>Cycles</label><input id="trainCycles" type="number" min="1" max="20" value="${t.cycles}" ${t.running?'disabled':''}></div><div class="field"><label>Activity</label><select id="trainActivity" ${t.running?'disabled':''}><option value="computer" ${t.activity==='computer'?'selected':''}>Computer Work</option><option value="study" ${t.activity==='study'?'selected':''}>Study / Read</option><option value="running" ${t.activity==='running'?'selected':''}>Running / Exercise</option><option value="adventure" ${t.activity==='adventure'?'selected':''}>Adventure</option></select></div></div></div><div class="card center"><div class="sub" id="trainPhase">${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}</div><div id="trainClock" style="font-size:46px;font-weight:800;letter-spacing:2px;margin:8px 0">${timerText(r)}</div><div class="training-scene" id="trainScene">${trainingScene(t)}</div><div class="sub small">${esc(trainingLabel(t.activity))}${t.activity==='adventure'?' · cosmetic preview':''}</div></div><button class="btn primary" onclick="${t.running?'pauseTraining()':'startTraining()'}">${t.running?'Pause':'Start / Resume'}</button><button class="btn" onclick="resetTraining()">Reset / End Session</button><div class="sub small">Timer activity is cosmetic. Training Grounds does not award Stars, XP, Coins, or complete Quests.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;
+  return `<div class="screen"><h2>⚔️ Training Grounds</h2><div class="card"><div class="inline-grid"><div class="field"><label>Active</label><input id="trainActive" type="number" min="1" max="240" value="${t.activeMin}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div><div class="field"><label>Break</label><input id="trainBreak" type="number" min="1" max="120" value="${t.breakMin}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div></div><div class="inline-grid"><div class="field"><label>Cycles</label><input id="trainCycles" type="number" min="1" max="20" value="${t.cycles}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div><div class="field"><label>Activity</label><select id="trainActivity" onchange="previewTrainingSetup()" ${t.running?'disabled':''}><option value="computer" ${t.activity==='computer'?'selected':''}>Computer Work</option><option value="study" ${t.activity==='study'?'selected':''}>Study / Read</option><option value="running" ${t.activity==='running'?'selected':''}>Running / Exercise</option><option value="adventure" ${t.activity==='adventure'?'selected':''}>Adventure</option></select></div></div></div><div class="card center"><div class="sub" id="trainPhase">${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}</div><div id="trainClock" style="font-size:46px;font-weight:800;letter-spacing:2px;margin:8px 0">${timerText(r)}</div><div class="training-scene" id="trainScene">${trainingScene(t)}</div><div class="sub small" id="trainActivityLabel">${esc(trainingLabel(t.activity))}${t.activity==='adventure'?' · cosmetic preview':''}</div></div><button class="btn primary" onclick="${t.running?'pauseTraining()':'startTraining()'}">${t.running?'Pause':'Start / Resume'}</button><button class="btn" onclick="resetTraining()">Reset / End Session</button><div class="sub small">Timer activity is cosmetic. Training Grounds does not award Stars, XP, Coins, or complete Quests.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;
 }
 function readTrainingSetup(){
   const t=getTraining();t.activeMin=Math.max(1,Math.min(240,parseInt(document.getElementById('trainActive')?.value||t.activeMin)||25));t.breakMin=Math.max(1,Math.min(120,parseInt(document.getElementById('trainBreak')?.value||t.breakMin)||5));t.cycles=Math.max(1,Math.min(20,parseInt(document.getElementById('trainCycles')?.value||t.cycles)||4));t.activity=document.getElementById('trainActivity')?.value||t.activity;
 }
-function startTraining(){const t=getTraining();if(!t.running){readTrainingSetup();const r=t.pausedRemaining>0?t.pausedRemaining:trainingDuration(t);t.running=true;t.phaseStartedAt=Date.now();t.phaseEndsAt=Date.now()+r*1000;save();render();startTrainingTicker()}}
-function pauseTraining(){const t=syncTraining();t.pausedRemaining=trainingRemaining(t);t.running=false;t.phaseEndsAt=null;t.phaseStartedAt=null;save();render()}
+function previewTrainingSetup(){
+  const t=getTraining();if(t.running)return;
+  readTrainingSetup();
+  if(!t.paused){t.phase='active';t.cycle=1;t.pausedRemaining=t.activeMin*60}
+  save();
+  const c=document.getElementById('trainClock'),p=document.getElementById('trainPhase'),sc=document.getElementById('trainScene'),lab=document.getElementById('trainActivityLabel');
+  if(c)c.textContent=timerText(trainingRemaining(t));
+  if(p)p.textContent=`${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}`;
+  if(sc)sc.textContent=trainingScene(t);
+  if(lab)lab.textContent=trainingLabel(t.activity)+(t.activity==='adventure'?' · cosmetic preview':'');
+}
+function startTraining(){const t=getTraining();if(!t.running){readTrainingSetup();const r=t.paused?Math.max(1,t.pausedRemaining):trainingDuration(t);t.paused=false;t.pausedRemaining=r;t.running=true;t.phaseStartedAt=Date.now();t.phaseEndsAt=Date.now()+r*1000;save();render();startTrainingTicker()}}
+function pauseTraining(){const t=syncTraining();t.pausedRemaining=trainingRemaining(t);t.paused=true;t.running=false;t.phaseEndsAt=null;t.phaseStartedAt=null;save();render()}
 function resetTraining(){state.training=defaultTraining();save();render()}
 let trainingTicker=null;
 function startTrainingTicker(){clearInterval(trainingTicker);trainingTicker=setInterval(()=>{const t=syncTraining();if(!t.running){clearInterval(trainingTicker);trainingTicker=null}if(state.screen==='trainingGrounds')updateTrainingDOM();else updateTrainingIndicator()},1000)}
@@ -1200,7 +1211,7 @@ function completedQuestFolder(){
   const sub=state.subQuests.find(x=>x.id===state.completedFolderSubId);if(!sub)return `<div class="screen"><h2>Completed Quests</h2><div class="card sub">Sub-Quest not found.</div></div>`;
   const qs=state.quests.filter(q=>q.parentSubQuestId===sub.id&&q.completed).sort((a,b)=>new Date(b.completedAt||0)-new Date(a.completedAt||0));
   return `<div class="screen"><h2>Completed Quests</h2><div class="sub" style="margin-bottom:12px">${esc(sub.title)}</div>
-    ${qs.length?qs.map(q=>`<div class="card completed" onclick="openHierarchyDetail('quest','${q.id}')"><div class="between"><strong>${esc(q.title)}</strong><span>Completed</span></div><div class="sub small">${starDisplay(q.stars,q.earnedStars||0,true)}</div></div>`).join(''):'<div class="card sub">No completed Quests.</div>'}
+    ${qs.length?qs.map(q=>`<div class="card completed" onclick="openLoggedQuest('${q.id}',false)"><div class="between"><strong>${esc(q.title)}</strong><span>Completed</span></div><div class="sub small">${starDisplay(q.stars,q.earnedStars||0,true)}</div></div>`).join(''):'<div class="card sub">No completed Quests.</div>'}
   </div>`
 }
 
@@ -1234,7 +1245,7 @@ function hierarchyDetail(){
     ${type==='chapter'?`<div class="between" style="margin-top:18px"><h3 style="margin:0">Sub-Quests</h3><button class="btn" style="width:auto;margin:0" onclick="openCreateSubQuest('${id}')">＋ Sub-Quest</button></div>
       <div style="margin-top:10px">${subs.length?subs.map(s=>`<div class="card" draggable="true" ondragstart="subDragStart(event,'${s.id}')" ondragover="event.preventDefault()" ondrop="subDropOnChapter(event,'${s.id}','${id}')" onclick="openHierarchyDetail('sub','${s.id}','chapter','${id}')"><div class="between"><span><span class="drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">≡</span> <strong>${esc(s.title)}</strong></span><span class="badge">${esc(s.rarity||'Common')}</span></div><div class="progress"><div style="width:${subQuestProgress(s.id).pct}%"></div></div><div class="sub small">${subQuestProgress(s.id).done}/${subQuestProgress(s.id).total} Active Quests complete</div></div>`).join(''):'<div class="card sub">No Sub-Quests yet.</div>'}</div>`:
       `<div class="between" style="margin-top:18px"><h3 style="margin:0">Active Quests</h3><button class="btn" style="width:auto;margin:0" onclick="openCreateActiveQuest('${id}')">＋ Active Quest</button></div>
-      <div style="margin-top:10px">${activeQuests.length?activeQuests.map(q=>`<div class="card" onclick="openHierarchyDetail('quest','${q.id}')"><div class="between"><strong>${esc(q.title)}</strong><span>Active</span></div><div class="sub small">Active Quest · ${starDisplay(q.stars,q.earnedStars||0,false)}</div></div>`).join(''):'<div class="card sub">No Active Quests yet.</div>'}
+      <div style="margin-top:10px">${activeQuests.length?activeQuests.map(q=>`<div class="card" onclick="openLoggedQuest('${q.id}',false)"><div class="between"><strong>${esc(q.title)}</strong><span>Active</span></div><div class="sub small">Active Quest · ${starDisplay(q.stars,q.earnedStars||0,false)}</div></div>`).join(''):'<div class="card sub">No Active Quests yet.</div>'}
       ${completedQuests.length?`<div class="card quest-card" style="margin-top:12px" onclick="openCompletedQuestFolder('${id}')"><div class="between"><strong>📁 Completed Quests</strong><span>${completedQuests.length}</span></div><div class="sub small">View completed Active Quests</div></div>`:''}</div>`}
     <button class="btn" onclick="${type==='chapter'?`editChapterQuest('${id}')`:`editSubQuest('${id}')`}">Edit Quest</button>
     <button class="btn primary" onclick="alert('Chapter/Sub-Quest completion will use the universal completion survey.')">Complete Quest</button>
