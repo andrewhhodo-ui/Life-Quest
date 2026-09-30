@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4W.1 Quest Routing + Training Fix</title>
+<title>Life Quest Prototype v4W.3 Recurring Repair + Training Presets</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -144,7 +144,7 @@ const DEFAULT={
   questTab:'all',
   chapterQuests:[],subQuests:[],
   constructionReadyAt:null,constructionStage:0,
-  selectedHex:null,placedCornerstones:[],placedBuildings:[],pendingBuilding:null,training:null,hierarchyView:null,completionReturn:null,helpSeen:{chapter:false,rarity:false},detailReturn:'home',
+  selectedHex:null,placedCornerstones:[],placedBuildings:[],pendingBuilding:null,training:null,trainingPresets:[],selectedTrainingPreset:null,hierarchyView:null,completionReturn:null,helpSeen:{chapter:false,rarity:false},detailReturn:'home',
   focusChapterId:null,focusTab:'due',movingCornerstone:null,chapterCollapsed:{},questLogFolder:null,
   requirements:{
     freeQuestCreated:false,freeQuestCompleted:false,
@@ -162,6 +162,7 @@ state.subQuests=Array.isArray(state.subQuests)?state.subQuests:[];
 state.requirements=Object.assign({},DEFAULT.requirements,state.requirements||{});
 state.placedCornerstones=Array.isArray(state.placedCornerstones)?state.placedCornerstones:[];
 state.placedBuildings=Array.isArray(state.placedBuildings)?state.placedBuildings:[];
+state.trainingPresets=Array.isArray(state.trainingPresets)?state.trainingPresets:[];
 if(state.placedCornerstone&&state.placedCornerstone.hex!=null&&!state.placedCornerstones.length)state.placedCornerstones=[state.placedCornerstone];
 state.helpSeen=Object.assign({chapter:false,rarity:false},state.helpSeen||{});
 state.chapterCollapsed=state.chapterCollapsed||{};
@@ -203,7 +204,7 @@ function restoreSnapshot(h){
   if(h?.selectedHex!=null)state.selectedHex=h.selectedHex;
 }
 function go(screen,opts={}){
-  if(!opts.noHistory&&state.screen&&state.screen!==screen){
+  if(!opts.noHistory&&state.screen&&state.screen!==screen&&state.screen!=='questDetail'){
     state.navHistory=state.navHistory||[];
     state.navHistory.push(navSnapshot());
     if(state.navHistory.length>40)state.navHistory.shift();
@@ -212,7 +213,12 @@ function go(screen,opts={}){
 }
 function navHome(){state.navHistory=[];state.screen='home';save();render()}
 function navBack(){
-  const h=(state.navHistory||[]).pop();
+  state.navHistory=state.navHistory||[];
+  let h=null;
+  while(state.navHistory.length&&!h){
+    const candidate=state.navHistory.pop();
+    if(candidate?.screen!=='questDetail'&&!['resolve','reward','bulkResolve'].includes(candidate?.screen))h=candidate;
+  }
   if(!h){state.screen='home';save();render();return}
   restoreSnapshot(h);save();render()
 }
@@ -506,6 +512,25 @@ function dueList(){
 function freshQuestId(){
   let id; do{id='q-'+Date.now()+'-'+Math.random().toString(36).slice(2,9)}while(state.quests.some(q=>q.id===id)); return id;
 }
+function recurringSignature(q){return [q.title||'',q.repeat||'',JSON.stringify(q.repeatDays||[]),q.seriesStartDate||q.startDate||''].join('|')}
+function propagateRecurringPlacement(q){
+  if(!q||!isRecurring(q))return;
+  const sid=q.seriesId||q.id, members=state.quests.filter(x=>isRecurring(x)&&(x.seriesId||x.id)===sid);
+  members.forEach(x=>{x.type=q.type;x.parentSubQuestId=q.parentSubQuestId||null});
+}
+function repairMovedRecurringSeries(){
+  const groups=new Map();state.quests.filter(isRecurring).forEach(q=>{const k=recurringSignature(q);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(q)});
+  let changed=false;
+  groups.forEach(items=>{
+    const sids=[...new Set(items.map(q=>q.seriesId||q.id))];if(sids.length<2)return;
+    const bySid=sids.map(sid=>items.filter(q=>(q.seriesId||q.id)===sid));
+    const overlaps=bySid.some((a,i)=>bySid.slice(i+1).some(b=>{const dates=new Set(a.map(x=>x.occurrenceDate).filter(Boolean));return b.some(x=>x.occurrenceDate&&dates.has(x.occurrenceDate))}));
+    const placed=items.filter(q=>q.parentSubQuestId);if(!overlaps||!placed.length)return;
+    const canonical=placed.sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0))[0],sid=canonical.seriesId||canonical.id;
+    items.forEach(q=>{if((q.seriesId||q.id)!==sid){q.seriesId=sid;changed=true}q.type=canonical.type;q.parentSubQuestId=canonical.parentSubQuestId||null});
+  });
+  if(changed)save();
+}
 function repairRecurringIntegrity(){
   let changed=false;
   // Every Quest occurrence must have a unique id.
@@ -517,7 +542,7 @@ function repairRecurringIntegrity(){
   bySid.forEach((items,sid)=>{
     const buckets=new Map();
     items.forEach(q=>{
-      const key=[q.title||'',q.parentSubQuestId||'',q.repeat||'',JSON.stringify(q.repeatDays||[]),q.seriesStartDate||q.startDate||''].join('|');
+      const key=[q.title||'',q.repeat||'',JSON.stringify(q.repeatDays||[]),q.seriesStartDate||q.startDate||''].join('|');
       if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(q);
     });
     if(buckets.size>1){
@@ -531,6 +556,7 @@ function repairRecurringIntegrity(){
   if(changed)save();
 }
 repairRecurringIntegrity();
+repairMovedRecurringSeries();
 
 function scheduledOnDate(q,dateISO){
   if(!isRecurring(q))return false;const d=new Date(dateISO+'T12:00:00'),start=new Date((q.seriesStartDate||q.startDate||dateISO)+'T12:00:00');if(d<start)return false;
@@ -548,8 +574,9 @@ function ensureRecurringOccurrences(){
 }
 function recurringSeries(){ensureRecurringOccurrences();const m=new Map();state.quests.filter(isRecurring).forEach(q=>{const sid=q.seriesId||q.id;if(!m.has(sid))m.set(sid,[]);m.get(sid).push(q)});return m}
 function dailySeriesCards(){
-  const today=todayISO(),out=[];recurringSeries().forEach((items,sid)=>{const todays=items.find(q=>q.occurrenceDate===today);if(!todays)return;const overdue=items.filter(q=>!q.completed&&q.occurrenceDate<today).length;out.push({sid,q:todays,overdue});});
-  return out.sort((a,b)=>Number(a.q.completed)-Number(b.q.completed)||a.q.title.localeCompare(b.q.title));
+  repairMovedRecurringSeries();const today=todayISO(),raw=[];recurringSeries().forEach((items,sid)=>{const todays=items.find(q=>q.occurrenceDate===today);if(!todays)return;const overdue=items.filter(q=>!q.completed&&q.occurrenceDate<today).length;raw.push({sid,q:todays,overdue});});
+  const byKey=new Map();raw.forEach(x=>{const k=recurringSignature(x.q);const prev=byKey.get(k);if(!prev||(x.q.parentSubQuestId&&!prev.q.parentSubQuestId))byKey.set(k,x)});
+  return [...byKey.values()].sort((a,b)=>Number(a.q.completed)-Number(b.q.completed)||a.q.title.localeCompare(b.q.title));
 }
 function dailyCard(x){return `<div class="card routine-row ${x.q.completed?'completed':''}" onclick="openRoutineFolder('${x.sid}')"><div class="between"><strong>${esc(x.q.title)}</strong><span>${x.q.completed?'✓ '+starDisplay(x.q.stars,x.q.earnedStars||0,true):starDisplay(x.q.stars,x.q.earnedStars||0,false)}</span></div><div class="sub small">${x.q.completed?'Completed today':'Today'}${x.overdue?' · '+x.overdue+' overdue':''}</div></div>`}
 function focusView(){
@@ -585,7 +612,7 @@ function home(){
   else if(state.constructionReadyAt&&state.constructionStage===0){const m=Math.max(1,Math.ceil((state.constructionReadyAt-Date.now())/60000));toast=`<div class="toast">🏗️ Construction begins in ${m} min</div>`}
   return `<div class="settlement">${hud()}<div class="world">
     <div class="hexboard">${boardHexes().map(h=>{const c=cornerAt(h.id),b=buildingAt(h.id),p=hexPos(h.q,h.r);return `<div class="hex ${state.innerRingUnlocked?'':'fog'}" style="left:${p.left-45}px;top:${p.top-52}px" onclick="${state.innerRingUnlocked?(c?`openCornerstone(${h.id})`:(b?`openBuilding(${h.id})`:`selectEmptyHex(${h.id})`)):''}">${c?c.icon:(b?b.icon:'')}</div>`}).join('')}</div>
-    ${state.selectedHex!=null&&!occupiedAt(state.selectedHex)?`<div class="hex-action"><button class="btn primary" onclick="beginCornerstoneFromHex()">＋ Place Cornerstone</button></div>`:''}
+    ${state.selectedHex!=null&&!occupiedAt(state.selectedHex)?`<div class="hex-action"><button class="btn primary" onclick="go('createBuildingMenu')">＋ Building</button></div>`:''}
     ${state.firstHomeReadyAt&&!state.firstHomeUpgraded?`<div class="build-bubble" style="left:50%;top:42%">🏗️ ${Math.max(1,Math.ceil((state.firstHomeReadyAt-Date.now())/60000))}m</div>`:''}
     ${state.constructionReadyAt&&state.placedCornerstones.length?`<div class="build-bubble" style="left:50%;top:45%">🏗️ ${state.constructionStage?'Stage 1':Math.max(1,Math.ceil((state.constructionReadyAt-Date.now())/60000))+'m'}</div>`:''}
     <div class="center-camp"><div class="tree">🌳</div><div class="tent">${state.firstHomeUpgraded?'🏠':'⛺'}</div><div class="fire">🔥</div><div class="hero">🧍</div></div>
@@ -749,32 +776,57 @@ function commitBuilding(hex){
 }
 function openBuilding(hex){const b=buildingAt(hex);if(b?.type==='training')openTrainingGrounds()}
 function openTrainingGrounds(){syncTraining();go('trainingGrounds')}
-function defaultTraining(){return {running:false,paused:false,phase:'active',activeMin:25,breakMin:5,cycles:4,cycle:1,activity:'adventure',phaseStartedAt:null,phaseEndsAt:null,pausedRemaining:25*60};}
-function getTraining(){if(!state.training)state.training=defaultTraining();return state.training}
+function defaultTraining(){return {running:false,paused:false,phase:'active',activeMin:25,breakMin:5,cycles:4,cycle:1,activity:'adventure',soundOn:true,phaseStartedAt:null,phaseEndsAt:null,pausedRemaining:25*60};}
+function getTraining(){if(!state.training)state.training=defaultTraining();if(state.training.soundOn==null)state.training.soundOn=true;return state.training}
 function trainingDuration(t){return (t.phase==='active'?t.activeMin:t.breakMin)*60}
 function trainingRemaining(t=getTraining()){if(t.running&&t.phaseEndsAt)return Math.max(0,Math.ceil((t.phaseEndsAt-Date.now())/1000));return Math.max(0,t.pausedRemaining??trainingDuration(t))}
+let trainingWakeLock=null;
+let trainingAudioCtx=null;
+async function requestTrainingWakeLock(){
+  const t=getTraining();
+  if(!t.running||document.visibilityState!=='visible'||!('wakeLock' in navigator)||trainingWakeLock)return;
+  try{trainingWakeLock=await navigator.wakeLock.request('screen');trainingWakeLock.addEventListener('release',()=>{trainingWakeLock=null})}catch(e){}
+}
+async function releaseTrainingWakeLock(){if(trainingWakeLock){try{await trainingWakeLock.release()}catch(e){}trainingWakeLock=null}}
+function syncTrainingWakeLock(){const t=getTraining();if(t.running)requestTrainingWakeLock();else releaseTrainingWakeLock()}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&getTraining().running)requestTrainingWakeLock()});
+function setTrainingSound(on){const t=getTraining();t.soundOn=!!on;save();if(on)primeTrainingAudio()}
+function primeTrainingAudio(){try{trainingAudioCtx=trainingAudioCtx||new (window.AudioContext||window.webkitAudioContext)();if(trainingAudioCtx.state==='suspended')trainingAudioCtx.resume()}catch(e){}}
+function trainingChime(kind){
+  const t=getTraining();if(!t.soundOn)return;
+  try{primeTrainingAudio();if(!trainingAudioCtx)return;const now=trainingAudioCtx.currentTime;const freqs=kind==='break'?[659.25,523.25]:kind==='active'?[523.25,659.25]:[523.25,659.25,783.99];freqs.forEach((f,i)=>{const o=trainingAudioCtx.createOscillator(),g=trainingAudioCtx.createGain();o.type='sine';o.frequency.value=f;o.connect(g);g.connect(trainingAudioCtx.destination);const st=now+i*.14;g.gain.setValueAtTime(.0001,st);g.gain.exponentialRampToValueAtTime(.16,st+.015);g.gain.exponentialRampToValueAtTime(.0001,st+.22);o.start(st);o.stop(st+.24)})}catch(e){}
+}
 function syncTraining(){
-  const t=getTraining();if(!t.running||!t.phaseEndsAt)return t;
+  const t=getTraining();if(!t.running||!t.phaseEndsAt){syncTrainingWakeLock();return t}
   let now=Date.now(),guard=0;
   while(t.running&&now>=t.phaseEndsAt&&guard++<100){
-    if(t.phase==='active'){t.phase='break';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.breakMin*60000}
-    else if(t.cycle<t.cycles){t.cycle++;t.phase='active';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.activeMin*60000}
-    else{t.running=false;t.paused=false;t.pausedRemaining=0;t.phaseEndsAt=null;t.phaseStartedAt=null}
+    if(t.phase==='active'){t.phase='break';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.breakMin*60000;trainingChime('break')}
+    else if(t.cycle<t.cycles){t.cycle++;t.phase='active';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.activeMin*60000;trainingChime('active')}
+    else{t.running=false;t.paused=false;t.pausedRemaining=0;t.phaseEndsAt=null;t.phaseStartedAt=null;trainingChime('done')}
   }
-  save();return t;
+  save();syncTrainingWakeLock();return t;
 }
 function trainingLabel(a){return ({computer:'Computer Work',study:'Study / Read',running:'Running / Exercise',adventure:'Adventure'})[a]||'Adventure'}
 function trainingScene(t){if(t.activity==='computer')return t.phase==='active'?'🧑‍💻':'☕ 🧑';if(t.activity==='study')return t.phase==='active'?'🧑 📖':'☕ 🧑';if(t.activity==='running')return t.phase==='active'?'🏃 · · 🌲':'🧘 💧';return t.phase==='active'?'🛡️ 🧙 ⚔️ 👾':'⛺ 🧙 ❤️‍🩹'}
 function timerText(sec){sec=Math.max(0,Math.floor(sec));return `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`}
 function trainingGrounds(){
   const t=syncTraining(),r=trainingRemaining(t);
-  return `<div class="screen"><h2>⚔️ Training Grounds</h2><div class="card"><div class="inline-grid"><div class="field"><label>Active</label><input id="trainActive" type="number" min="1" max="240" value="${t.activeMin}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div><div class="field"><label>Break</label><input id="trainBreak" type="number" min="1" max="120" value="${t.breakMin}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div></div><div class="inline-grid"><div class="field"><label>Cycles</label><input id="trainCycles" type="number" min="1" max="20" value="${t.cycles}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div><div class="field"><label>Activity</label><select id="trainActivity" onchange="previewTrainingSetup()" ${t.running?'disabled':''}><option value="computer" ${t.activity==='computer'?'selected':''}>Computer Work</option><option value="study" ${t.activity==='study'?'selected':''}>Study / Read</option><option value="running" ${t.activity==='running'?'selected':''}>Running / Exercise</option><option value="adventure" ${t.activity==='adventure'?'selected':''}>Adventure</option></select></div></div></div><div class="card center"><div class="sub" id="trainPhase">${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}</div><div id="trainClock" style="font-size:46px;font-weight:800;letter-spacing:2px;margin:8px 0">${timerText(r)}</div><div class="training-scene" id="trainScene">${trainingScene(t)}</div><div class="sub small" id="trainActivityLabel">${esc(trainingLabel(t.activity))}${t.activity==='adventure'?' · cosmetic preview':''}</div></div><button class="btn primary" onclick="${t.running?'pauseTraining()':'startTraining()'}">${t.running?'Pause':'Start / Resume'}</button><button class="btn" onclick="resetTraining()">Reset / End Session</button><div class="sub small">Timer activity is cosmetic. Training Grounds does not award Stars, XP, Coins, or complete Quests.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;
+  return `<div class="screen"><h2>⚔️ Training Grounds</h2><div class="card"><div class="inline-grid"><div class="field"><label>Active</label><input id="trainActive" type="number" min="1" max="240" value="${t.activeMin}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div><div class="field"><label>Break</label><input id="trainBreak" type="number" min="1" max="120" value="${t.breakMin}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div></div><div class="inline-grid"><div class="field"><label>Cycles</label><input id="trainCycles" type="number" min="1" max="20" value="${t.cycles}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div><div class="field"><label>Activity</label><select id="trainActivity" onchange="previewTrainingSetup()" ${t.running?'disabled':''}><option value="computer" ${t.activity==='computer'?'selected':''}>Computer Work</option><option value="study" ${t.activity==='study'?'selected':''}>Study / Read</option><option value="running" ${t.activity==='running'?'selected':''}>Running / Exercise</option><option value="adventure" ${t.activity==='adventure'?'selected':''}>Adventure</option></select></div></div></div><div class="card"><div class="field"><label>Preset</label><select id="trainPreset" onchange="loadTrainingPreset(this.value)"><option value="">Custom</option>${state.trainingPresets.map(p=>`<option value="${p.id}" ${state.selectedTrainingPreset===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div><div class="inline-grid"><button class="btn" onclick="saveTrainingPreset()">Save Preset</button><button class="btn" ${state.selectedTrainingPreset?'':'disabled'} onclick="updateTrainingPreset()">Update</button></div>${state.selectedTrainingPreset?`<div class="inline-grid" style="margin-top:8px"><button class="btn ghost" onclick="renameTrainingPreset()">Rename</button><button class="btn danger" onclick="deleteTrainingPreset()">Delete</button></div>`:''}</div><div class="card"><label style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span>Transition sounds</span><input id="trainSound" type="checkbox" ${t.soundOn?'checked':''} onchange="setTrainingSound(this.checked)" style="width:auto"></label></div><div class="card center"><div class="sub" id="trainPhase">${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}</div><div id="trainClock" style="font-size:46px;font-weight:800;letter-spacing:2px;margin:8px 0">${timerText(r)}</div><div class="training-scene" id="trainScene">${trainingScene(t)}</div><div class="sub small" id="trainActivityLabel">${esc(trainingLabel(t.activity))}${t.activity==='adventure'?' · cosmetic preview':''}</div></div><button class="btn primary" onclick="${t.running?'pauseTraining()':'startTraining()'}">${t.running?'Pause':'Start / Resume'}</button><button class="btn" onclick="resetTraining()">Reset / End Session</button><div class="sub small">Timer activity is cosmetic. Training Grounds does not award Stars, XP, Coins, or complete Quests.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;
 }
 function readTrainingSetup(){
   const t=getTraining();t.activeMin=Math.max(1,Math.min(240,parseInt(document.getElementById('trainActive')?.value||t.activeMin)||25));t.breakMin=Math.max(1,Math.min(120,parseInt(document.getElementById('trainBreak')?.value||t.breakMin)||5));t.cycles=Math.max(1,Math.min(20,parseInt(document.getElementById('trainCycles')?.value||t.cycles)||4));t.activity=document.getElementById('trainActivity')?.value||t.activity;
 }
+function trainingSetupValues(){
+  const t=getTraining();return {activeMin:Math.max(1,Math.min(240,parseInt(document.getElementById('trainActive')?.value||t.activeMin)||25)),breakMin:Math.max(1,Math.min(120,parseInt(document.getElementById('trainBreak')?.value||t.breakMin)||5)),cycles:Math.max(1,Math.min(20,parseInt(document.getElementById('trainCycles')?.value||t.cycles)||4)),activity:document.getElementById('trainActivity')?.value||t.activity};
+}
+function loadTrainingPreset(id){if(!id){state.selectedTrainingPreset=null;save();return}const p=state.trainingPresets.find(x=>x.id===id),t=getTraining();if(!p||t.running)return;Object.assign(t,{activeMin:p.activeMin,breakMin:p.breakMin,cycles:p.cycles,activity:p.activity,phase:'active',cycle:1,paused:false,pausedRemaining:p.activeMin*60});state.selectedTrainingPreset=id;save();render()}
+function saveTrainingPreset(){if(getTraining().running)return;const v=trainingSetupValues(),name=(prompt('Preset name:')||'').trim();if(!name)return;const p={id:'tp-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),name,...v};state.trainingPresets.push(p);state.selectedTrainingPreset=p.id;Object.assign(getTraining(),v,{phase:'active',cycle:1,paused:false,pausedRemaining:v.activeMin*60});save();render()}
+function updateTrainingPreset(){if(getTraining().running||!state.selectedTrainingPreset)return;const p=state.trainingPresets.find(x=>x.id===state.selectedTrainingPreset);if(!p)return;Object.assign(p,trainingSetupValues());save();render()}
+function renameTrainingPreset(){const p=state.trainingPresets.find(x=>x.id===state.selectedTrainingPreset);if(!p)return;const name=(prompt('Preset name:',p.name)||'').trim();if(!name)return;p.name=name;save();render()}
+function deleteTrainingPreset(){const p=state.trainingPresets.find(x=>x.id===state.selectedTrainingPreset);if(!p)return;if(!confirm(`Delete preset "${p.name}"?`))return;state.trainingPresets=state.trainingPresets.filter(x=>x.id!==p.id);state.selectedTrainingPreset=null;save();render()}
 function previewTrainingSetup(){
   const t=getTraining();if(t.running)return;
+  state.selectedTrainingPreset=null;
   readTrainingSetup();
   if(!t.paused){t.phase='active';t.cycle=1;t.pausedRemaining=t.activeMin*60}
   save();
@@ -784,9 +836,9 @@ function previewTrainingSetup(){
   if(sc)sc.textContent=trainingScene(t);
   if(lab)lab.textContent=trainingLabel(t.activity)+(t.activity==='adventure'?' · cosmetic preview':'');
 }
-function startTraining(){const t=getTraining();if(!t.running){readTrainingSetup();const r=t.paused?Math.max(1,t.pausedRemaining):trainingDuration(t);t.paused=false;t.pausedRemaining=r;t.running=true;t.phaseStartedAt=Date.now();t.phaseEndsAt=Date.now()+r*1000;save();render();startTrainingTicker()}}
-function pauseTraining(){const t=syncTraining();t.pausedRemaining=trainingRemaining(t);t.paused=true;t.running=false;t.phaseEndsAt=null;t.phaseStartedAt=null;save();render()}
-function resetTraining(){state.training=defaultTraining();save();render()}
+function startTraining(){const t=getTraining();if(!t.running){readTrainingSetup();primeTrainingAudio();const r=t.paused?Math.max(1,t.pausedRemaining):trainingDuration(t);t.paused=false;t.pausedRemaining=r;t.running=true;t.phaseStartedAt=Date.now();t.phaseEndsAt=Date.now()+r*1000;save();requestTrainingWakeLock();render();startTrainingTicker()}}
+function pauseTraining(){const t=syncTraining();t.pausedRemaining=trainingRemaining(t);t.paused=true;t.running=false;t.phaseEndsAt=null;t.phaseStartedAt=null;save();releaseTrainingWakeLock();render()}
+function resetTraining(){state.training=defaultTraining();save();releaseTrainingWakeLock();render()}
 let trainingTicker=null;
 function startTrainingTicker(){clearInterval(trainingTicker);trainingTicker=setInterval(()=>{const t=syncTraining();if(!t.running){clearInterval(trainingTicker);trainingTicker=null}if(state.screen==='trainingGrounds')updateTrainingDOM();else updateTrainingIndicator()},1000)}
 function updateTrainingDOM(){const t=syncTraining(),c=document.getElementById('trainClock'),p=document.getElementById('trainPhase'),sc=document.getElementById('trainScene');if(c)c.textContent=timerText(trainingRemaining(t));if(p)p.textContent=`${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}`;if(sc)sc.textContent=trainingScene(t)}
@@ -891,6 +943,7 @@ function saveQuestEditor(mode,id){
       x.parentSubQuestId=base.parentSubQuestId;
       x.type=base.type;
     });
+    if(isRecurring(q))propagateRecurringPlacement(q);
     save();state.currentQuest={kind:'quest',...q};go('questDetail');return;
   }
   const t2=getTutorial('t2');
