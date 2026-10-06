@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4W.4 Recurring Auto-Close + Training Transitions</title>
+<title>Life Quest Prototype v4W.5 Training Grounds Redesign</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -144,7 +144,7 @@ const DEFAULT={
   questTab:'all',
   chapterQuests:[],subQuests:[],
   constructionReadyAt:null,constructionStage:0,
-  selectedHex:null,placedCornerstones:[],placedBuildings:[],pendingBuilding:null,training:null,trainingPresets:[],selectedTrainingPreset:null,hierarchyView:null,completionReturn:null,helpSeen:{chapter:false,rarity:false},detailReturn:'home',
+  selectedHex:null,placedCornerstones:[],placedBuildings:[],pendingBuilding:null,training:null,trainingPresets:[],trainingHistory:[],selectedTrainingPreset:null,trainingOptionsOpen:false,hierarchyView:null,completionReturn:null,helpSeen:{chapter:false,rarity:false},detailReturn:'home',
   focusChapterId:null,focusTab:'due',movingCornerstone:null,chapterCollapsed:{},questLogFolder:null,
   requirements:{
     freeQuestCreated:false,freeQuestCompleted:false,
@@ -163,6 +163,8 @@ state.requirements=Object.assign({},DEFAULT.requirements,state.requirements||{})
 state.placedCornerstones=Array.isArray(state.placedCornerstones)?state.placedCornerstones:[];
 state.placedBuildings=Array.isArray(state.placedBuildings)?state.placedBuildings:[];
 state.trainingPresets=Array.isArray(state.trainingPresets)?state.trainingPresets:[];
+state.trainingHistory=Array.isArray(state.trainingHistory)?state.trainingHistory:[];
+state.trainingOptionsOpen=!!state.trainingOptionsOpen;
 if(state.placedCornerstone&&state.placedCornerstone.hex!=null&&!state.placedCornerstones.length)state.placedCornerstones=[state.placedCornerstone];
 state.helpSeen=Object.assign({chapter:false,rarity:false},state.helpSeen||{});
 state.chapterCollapsed=state.chapterCollapsed||{};
@@ -700,7 +702,7 @@ function questDetail(){
   const tabs=instances.length>1?`<div class="instance-tabs">${instances.map((x,i)=>`<button class="instance-tab ${x.id===viewed.id?'active':''}" onclick="setQuestInstance('${x.id}')">${i===0?'Original':`Reopened ${i}`}</button>`).join('')}</div>`:'';
   return `<div class="screen with-sticky quest-view"><h2>${esc(logicalQuestLabel(viewed))}</h2>
     ${tabs}
-    ${!viewed.completed?`<button class="btn primary" style="margin:0 0 12px" ${canComplete?'':'disabled'} onclick="state.currentQuest={kind:'quest',...getQuest('${viewed.id}')};state.resolutionStars=${viewed.rootQuestId?`getQuest('${viewed.id}').earnedStars||0`:'0'};go('resolve')">Resolve Quest</button>`:''}
+    ${!viewed.completed?`<button class="btn primary" style="margin:0 0 12px" ${canComplete?'':'disabled'} onclick="state.currentQuest={kind:'quest',...getQuest('${viewed.id}')};state.resolutionStars=${viewed.rootQuestId?`getQuest('${viewed.id}').earnedStars||0`:'0'};go('resolve')">Resolve Quest</button>`:''}${!viewed.completed?`<button class="btn" style="margin:0 0 12px" onclick="trainQuest('${viewed.id}')">⚔ Train</button>`:''}
     <div class="form-grid">
       <div class="field"><label>Quest Type</label><select disabled><option>${isCorner?'Active Quest':(viewed.type||'Tutorial Quest')}</option></select></div>
       <div class="field"><label>Stars</label><div class="stars readonly">${starHTML}</div></div>
@@ -791,8 +793,8 @@ function commitBuilding(hex){
 }
 function openBuilding(hex){const b=buildingAt(hex);if(b?.type==='training')openTrainingGrounds()}
 function openTrainingGrounds(){syncTraining();go('trainingGrounds')}
-function defaultTraining(){return {running:false,paused:false,waiting:false,waitingFor:null,phase:'active',activeMin:25,breakMin:5,cycles:4,cycle:1,activity:'adventure',soundOn:true,pauseBeforeBreak:false,pauseBeforeActive:false,phaseStartedAt:null,phaseEndsAt:null,pausedRemaining:25*60};}
-function getTraining(){if(!state.training)state.training=defaultTraining();if(state.training.soundOn==null)state.training.soundOn=true;if(state.training.pauseBeforeBreak==null)state.training.pauseBeforeBreak=false;if(state.training.pauseBeforeActive==null)state.training.pauseBeforeActive=false;if(state.training.waiting==null)state.training.waiting=false;return state.training}
+function defaultTraining(){return {running:false,paused:false,waiting:false,waitingFor:null,phase:'active',activeMin:25,breakMin:5,cycles:4,cycle:1,activity:'adventure',soundOn:true,alarmSound:'adventureBell',alarmRepeat:1,longRestMin:15,longRestEvery:4,pauseBeforeBreak:false,pauseBeforeActive:false,phaseStartedAt:null,phaseEndsAt:null,pausedRemaining:25*60,targetQuestId:null,sessionStartedAt:null};}
+function getTraining(){if(!state.training)state.training=defaultTraining();const t=state.training;if(t.soundOn==null)t.soundOn=true;if(!t.alarmSound)t.alarmSound='adventureBell';if(!t.alarmRepeat)t.alarmRepeat=1;if(t.longRestMin==null)t.longRestMin=15;if(t.longRestEvery==null)t.longRestEvery=4;if(t.pauseBeforeBreak==null)t.pauseBeforeBreak=false;if(t.pauseBeforeActive==null)t.pauseBeforeActive=false;if(t.waiting==null)t.waiting=false;if(t.targetQuestId===undefined)t.targetQuestId=null;if(t.sessionStartedAt===undefined)t.sessionStartedAt=null;return t}
 function trainingDuration(t){return (t.phase==='active'?t.activeMin:t.breakMin)*60}
 function trainingRemaining(t=getTraining()){if(t.running&&t.phaseEndsAt)return Math.max(0,Math.ceil((t.phaseEndsAt-Date.now())/1000));return Math.max(0,t.pausedRemaining??trainingDuration(t))}
 let trainingWakeLock=null;
@@ -807,10 +809,7 @@ function syncTrainingWakeLock(){const t=getTraining();if(t.running)requestTraini
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&getTraining().running)requestTrainingWakeLock()});
 function setTrainingSound(on){const t=getTraining();t.soundOn=!!on;save();if(on)primeTrainingAudio()}
 function primeTrainingAudio(){try{trainingAudioCtx=trainingAudioCtx||new (window.AudioContext||window.webkitAudioContext)();if(trainingAudioCtx.state==='suspended')trainingAudioCtx.resume();const o=trainingAudioCtx.createOscillator(),g=trainingAudioCtx.createGain();g.gain.value=.00001;o.connect(g);g.connect(trainingAudioCtx.destination);o.start();o.stop(trainingAudioCtx.currentTime+.02)}catch(e){}}
-function trainingChime(kind){
-  const t=getTraining();if(!t.soundOn)return;
-  try{primeTrainingAudio();if(!trainingAudioCtx)return;const now=trainingAudioCtx.currentTime;const freqs=kind==='break'?[659.25,523.25]:kind==='active'?[523.25,659.25]:[523.25,659.25,783.99];freqs.forEach((f,i)=>{const o=trainingAudioCtx.createOscillator(),g=trainingAudioCtx.createGain();o.type='sine';o.frequency.value=f;o.connect(g);g.connect(trainingAudioCtx.destination);const st=now+i*.14;g.gain.setValueAtTime(.0001,st);g.gain.exponentialRampToValueAtTime(.16,st+.015);g.gain.exponentialRampToValueAtTime(.0001,st+.22);o.start(st);o.stop(st+.24)})}catch(e){}
-}
+function trainingChime(kind='active'){const t=getTraining();if(!t.soundOn||t.alarmSound==='none')return;primeTrainingAudio();const ctx=trainingAudioCtx;if(!ctx)return;const profiles={adventureBell:[523.25,659.25,783.99],questComplete:[392,523.25,659.25,783.99],tavernBell:[329.63,493.88],digital:[880,1174.66],terminal:[659.25,783.99],soft:[523.25,659.25],classic:[440,660]};const notes=profiles[t.alarmSound]||profiles.adventureBell,reps=Math.max(1,Math.min(3,t.alarmRepeat||1));for(let r=0;r<reps;r++)notes.forEach((f,i)=>{try{const o=ctx.createOscillator(),g=ctx.createGain(),st=ctx.currentTime+r*.55+i*.11;o.frequency.value=f;o.type=t.alarmSound==='digital'?'square':'sine';g.gain.setValueAtTime(.0001,st);g.gain.exponentialRampToValueAtTime(.12,st+.015);g.gain.exponentialRampToValueAtTime(.0001,st+.28);o.connect(g);g.connect(ctx.destination);o.start(st);o.stop(st+.3)}catch(e){}})}
 function syncTraining(){
   const t=getTraining();if(!t.running||!t.phaseEndsAt){syncTrainingWakeLock();return t}
   let now=Date.now(),guard=0;
@@ -818,9 +817,9 @@ function syncTraining(){
     if(t.phase==='active'){
       trainingChime('break');
       if(t.pauseBeforeBreak){
-        t.running=false;t.waiting=true;t.waitingFor='break';t.paused=false;t.pausedRemaining=t.breakMin*60;t.phaseEndsAt=null;t.phaseStartedAt=null;
+        t.running=false;t.waiting=true;t.waitingFor='break';t.paused=false;t.pausedRemaining=trainingBreakDuration(t).seconds;t.phaseEndsAt=null;t.phaseStartedAt=null;
       }else{
-        t.phase='break';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.breakMin*60000;
+        t.phase='break';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+trainingBreakDuration(t).seconds*1000;
       }
     }else if(t.cycle<t.cycles){
       trainingChime('active');
@@ -830,7 +829,7 @@ function syncTraining(){
         t.cycle++;t.phase='active';t.phaseStartedAt=t.phaseEndsAt;t.phaseEndsAt=t.phaseStartedAt+t.activeMin*60000;
       }
     }else{
-      t.running=false;t.paused=false;t.waiting=false;t.waitingFor=null;t.pausedRemaining=0;t.phaseEndsAt=null;t.phaseStartedAt=null;trainingChime('done');
+      trainingChime('done');recordTrainingSession('completed');t.running=false;t.paused=false;t.waiting=false;t.waitingFor=null;t.pausedRemaining=0;t.phaseEndsAt=null;t.phaseStartedAt=null;
     }
   }
   save();syncTrainingWakeLock();return t;
@@ -839,16 +838,24 @@ function syncTraining(){
 function trainingLabel(a){return ({computer:'Computer Work',study:'Study / Read',running:'Running / Exercise',adventure:'Adventure'})[a]||'Adventure'}
 function trainingScene(t){if(t.activity==='computer')return t.phase==='active'?'🧑‍💻':'☕ 🧑';if(t.activity==='study')return t.phase==='active'?'🧑 📖':'☕ 🧑';if(t.activity==='running')return t.phase==='active'?'🏃 · · 🌲':'🧘 💧';return t.phase==='active'?'🛡️ 🧙 ⚔️ 👾':'⛺ 🧙 ❤️‍🩹'}
 function timerText(sec){sec=Math.max(0,Math.floor(sec));return `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`}
-function trainingGrounds(){
-  const t=syncTraining(),r=trainingRemaining(t);
-  return `<div class="screen"><h2>⚔️ Training Grounds</h2><div class="card"><div class="inline-grid"><div class="field"><label>Active</label><input id="trainActive" type="number" min="1" max="240" value="${t.activeMin}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div><div class="field"><label>Break</label><input id="trainBreak" type="number" min="1" max="120" value="${t.breakMin}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div></div><div class="inline-grid"><div class="field"><label>Cycles</label><input id="trainCycles" type="number" min="1" max="20" value="${t.cycles}" onchange="previewTrainingSetup()" ${t.running?'disabled':''}></div><div class="field"><label>Activity</label><select id="trainActivity" onchange="previewTrainingSetup()" ${t.running?'disabled':''}><option value="computer" ${t.activity==='computer'?'selected':''}>Computer Work</option><option value="study" ${t.activity==='study'?'selected':''}>Study / Read</option><option value="running" ${t.activity==='running'?'selected':''}>Running / Exercise</option><option value="adventure" ${t.activity==='adventure'?'selected':''}>Adventure</option></select></div></div></div><div class="card"><div class="field"><label>Preset</label><select id="trainPreset" onchange="loadTrainingPreset(this.value)"><option value="">Custom</option>${state.trainingPresets.map(p=>`<option value="${p.id}" ${state.selectedTrainingPreset===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div><div class="inline-grid"><button class="btn" onclick="saveTrainingPreset()">Save Preset</button><button class="btn" ${state.selectedTrainingPreset?'':'disabled'} onclick="updateTrainingPreset()">Update</button></div>${state.selectedTrainingPreset?`<div class="inline-grid" style="margin-top:8px"><button class="btn ghost" onclick="renameTrainingPreset()">Rename</button><button class="btn danger" onclick="deleteTrainingPreset()">Delete</button></div>`:''}</div><div class="card"><label style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span>Transition sounds</span><input id="trainSound" type="checkbox" ${t.soundOn?'checked':''} onchange="setTrainingSound(this.checked)" style="width:auto"></label></div><div class="card"><label style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span>Pause before Break</span><input type="checkbox" ${t.pauseBeforeBreak?'checked':''} onchange="setTrainingTransitionOption('pauseBeforeBreak',this.checked)" style="width:auto"></label><label style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px"><span>Pause before next Active</span><input type="checkbox" ${t.pauseBeforeActive?'checked':''} onchange="setTrainingTransitionOption('pauseBeforeActive',this.checked)" style="width:auto"></label></div><div class="card center"><div class="sub" id="trainPhase">${t.waiting?(t.waitingFor==='break'?'ACTIVE COMPLETE · Ready for Break':'BREAK COMPLETE · Ready for Active'):(t.phase==='active'?'ACTIVE':'BREAK')+' · Cycle '+t.cycle+' of '+t.cycles}</div><div id="trainClock" style="font-size:46px;font-weight:800;letter-spacing:2px;margin:8px 0">${timerText(r)}</div><div class="training-scene" id="trainScene">${trainingScene(t)}</div><div class="sub small" id="trainActivityLabel">${esc(trainingLabel(t.activity))}${t.activity==='adventure'?' · cosmetic preview':''}</div></div><button id="trainMainBtn" class="btn primary" onclick="${t.running?'pauseTraining()':'startTraining()'}">${t.running?'Pause':(t.waiting?(t.waitingFor==='break'?'Start Break':'Start Next Active'):'Start / Resume')}</button><button class="btn" onclick="resetTraining()">Reset / End Session</button><div class="sub small">Timer activity is cosmetic. Training Grounds does not award Stars, XP, Coins, or complete Quests.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;
-}
-function readTrainingSetup(){
-  const t=getTraining();t.activeMin=Math.max(1,Math.min(240,parseInt(document.getElementById('trainActive')?.value||t.activeMin)||25));t.breakMin=Math.max(1,Math.min(120,parseInt(document.getElementById('trainBreak')?.value||t.breakMin)||5));t.cycles=Math.max(1,Math.min(20,parseInt(document.getElementById('trainCycles')?.value||t.cycles)||4));t.activity=document.getElementById('trainActivity')?.value||t.activity;
-}
-function trainingSetupValues(){
-  const t=getTraining();return {activeMin:Math.max(1,Math.min(240,parseInt(document.getElementById('trainActive')?.value||t.activeMin)||25)),breakMin:Math.max(1,Math.min(120,parseInt(document.getElementById('trainBreak')?.value||t.breakMin)||5)),cycles:Math.max(1,Math.min(20,parseInt(document.getElementById('trainCycles')?.value||t.cycles)||4)),activity:document.getElementById('trainActivity')?.value||t.activity};
-}
+function trainingGrounds(){const t=syncTraining(),target=trainingTargetQuest(),longNow=t.phase==='break'&&trainingBreakDuration(t).long;return `<div class="screen training-screen"><h2>Training Grounds</h2>
+${target?`<div class="card"><div class="sub small">TRAINING FOR</div><b>${esc(target.title)}</b><button class="btn ghost" style="margin-top:8px" onclick="getTraining().targetQuestId=null;save();render()">Clear Quest</button></div>`:''}
+<div class="card"><div class="field"><label>Preset</label><select id="trainPreset" onchange="loadTrainingPreset(this.value)"><option value="">Custom</option>${state.trainingPresets.map(x=>`<option value="${x.id}" ${state.selectedTrainingPreset===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div></div>
+<div class="card" style="text-align:center"><div id="trainScene" style="font-size:72px;line-height:1.2;margin:8px 0 14px">${trainingScene(t)}</div><div class="sub" id="trainPhase">${t.waiting?(t.waitingFor==='break'?'ACTIVE COMPLETE · Ready for Break':'BREAK COMPLETE · Ready for Active'):((longNow?'LONG REST':t.phase==='active'?'ACTIVE':'BREAK')+' · Cycle '+t.cycle+' of '+t.cycles)}</div><div id="trainClock" style="font-size:52px;font-weight:800;letter-spacing:-2px;margin:8px 0">${timerText(trainingRemaining(t))}</div><div class="inline-grid"><button id="trainMainBtn" class="btn primary" onclick="${t.running?'pauseTraining()':'startTraining()'}">${t.running?'Pause':(t.waiting?(t.waitingFor==='break'?'Start Break':'Start Next Active'):'Start / Resume')}</button><button class="btn" onclick="resetTraining()">Reset / End</button></div><button class="btn ghost" style="margin-top:10px" onclick="openTrainingOptions()">⚙ Options</button></div>
+<div class="card"><h3 style="margin-top:0">Training History</h3>${trainingHistoryMarkup()}</div>
+${state.trainingOptionsOpen?`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Options</h3><button class="btn ghost" style="width:auto" onclick="closeTrainingOptions()">Close</button></div><div class="card" style="margin-top:12px"><div class="inline-grid"><div class="field"><label>Active</label><input id="trainActive" type="number" min="1" max="240" value="${t.activeMin}"></div><div class="field"><label>Break</label><input id="trainBreak" type="number" min="1" max="120" value="${t.breakMin}"></div></div><div class="inline-grid"><div class="field"><label>Cycles</label><input id="trainCycles" type="number" min="1" max="20" value="${t.cycles}"></div><div class="field"><label>Activity</label><select id="trainActivity"><option value="computer" ${t.activity==='computer'?'selected':''}>Computer Work</option><option value="study" ${t.activity==='study'?'selected':''}>Study / Read</option><option value="running" ${t.activity==='running'?'selected':''}>Running / Exercise</option><option value="adventure" ${t.activity==='adventure'?'selected':''}>Adventure</option></select></div></div><div class="inline-grid"><div class="field"><label>Long Rest</label><input id="trainLongRest" type="number" min="1" max="120" value="${t.longRestMin}"></div><div class="field"><label>Long Rest every</label><input id="trainLongEvery" type="number" min="1" max="20" value="${t.longRestEvery}"></div></div><div class="field"><label>Alarm Sound</label><select id="trainAlarmSound" onchange="setTrainingAlarmSound(this.value)"><option value="adventureBell" ${t.alarmSound==='adventureBell'?'selected':''}>RPG · Adventure Bell</option><option value="questComplete" ${t.alarmSound==='questComplete'?'selected':''}>RPG · Quest Complete</option><option value="tavernBell" ${t.alarmSound==='tavernBell'?'selected':''}>RPG · Tavern Bell</option><option value="digital" ${t.alarmSound==='digital'?'selected':''}>Computer · Digital</option><option value="terminal" ${t.alarmSound==='terminal'?'selected':''}>Computer · Terminal</option><option value="classic" ${t.alarmSound==='classic'?'selected':''}>Classic Bell</option><option value="soft" ${t.alarmSound==='soft'?'selected':''}>Soft Chime</option><option value="none" ${t.alarmSound==='none'?'selected':''}>No Sound</option></select></div><div class="field"><label>Alarm Repeat</label><select id="trainAlarmRepeat" onchange="setTrainingAlarmRepeat(this.value)"><option value="1" ${t.alarmRepeat===1?'selected':''}>1×</option><option value="2" ${t.alarmRepeat===2?'selected':''}>2×</option><option value="3" ${t.alarmRepeat===3?'selected':''}>3×</option></select></div><label style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px"><span>Pause before Break / Long Rest</span><input id="trainPauseBreak" type="checkbox" ${t.pauseBeforeBreak?'checked':''} style="width:auto"></label><label style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px"><span>Pause before next Active</span><input id="trainPauseActive" type="checkbox" ${t.pauseBeforeActive?'checked':''} style="width:auto"></label><button class="btn primary" style="margin-top:14px" onclick="saveTrainingPreset()">Save Preset</button>${state.selectedTrainingPreset?`<div class="inline-grid" style="margin-top:8px"><button class="btn" onclick="updateTrainingPreset()">Update Preset</button><button class="btn ghost" onclick="renameTrainingPreset()">Rename</button></div><button class="btn danger" style="margin-top:8px" onclick="deleteTrainingPreset()">Delete Preset</button>`:''}</div></div>`:''}</div>`}
+function readTrainingSetup(){const t=getTraining(),v=trainingSetupValues();Object.assign(t,v);t.soundOn=v.alarmSound!=='none';if(!t.running&&!t.paused&&!t.waiting)t.pausedRemaining=t.activeMin*60;save();return t}
+
+function trainingTargetQuest(){const t=getTraining();return t.targetQuestId?getQuest(t.targetQuestId):null}
+function openTrainingOptions(){state.trainingOptionsOpen=true;save();render()}
+function closeTrainingOptions(){state.trainingOptionsOpen=false;save();render()}
+function setTrainingAlarmSound(v){const t=getTraining();t.alarmSound=v;t.soundOn=v!=='none';save()}
+function setTrainingAlarmRepeat(v){const t=getTraining();t.alarmRepeat=Math.max(1,Math.min(3,parseInt(v)||1));save()}
+function trainingBreakDuration(t){const long=t.longRestEvery>0&&t.cycle%t.longRestEvery===0&&t.cycle<t.cycles;return {seconds:(long?t.longRestMin:t.breakMin)*60,long}}
+function recordTrainingSession(reason='ended'){const t=getTraining();if(!t.sessionStartedAt)return;const end=Date.now(),seconds=Math.max(0,Math.round((end-t.sessionStartedAt)/1000));if(seconds>=5){const q=trainingTargetQuest();state.trainingHistory=Array.isArray(state.trainingHistory)?state.trainingHistory:[];state.trainingHistory.unshift({id:'th-'+end,startedAt:new Date(t.sessionStartedAt).toISOString(),endedAt:new Date(end).toISOString(),seconds,activity:t.activity,presetId:state.selectedTrainingPreset||null,presetName:(state.trainingPresets.find(p=>p.id===state.selectedTrainingPreset)||{}).name||null,questId:q?.id||null,questTitle:q?.title||null,reason});state.trainingHistory=state.trainingHistory.slice(0,200)}t.sessionStartedAt=null;save()}
+function trainingHistoryMarkup(){const h=(state.trainingHistory||[]).slice(0,12);if(!h.length)return `<div class="sub">No Training sessions recorded yet.</div>`;return h.map(x=>`<div class="routine-row"><div><b>${new Date(x.startedAt).toLocaleDateString()}</b>${x.presetName?` · ${esc(x.presetName)}`:''}</div><div class="sub small">${esc(x.activity||'Training')} · ${Math.max(1,Math.round((x.seconds||0)/60))} min${x.questTitle?` · ${esc(x.questTitle)}`:''}</div></div>`).join('')}
+function trainQuest(id){const q=getQuest(id);if(!q||q.completed)return;const t=getTraining();t.targetQuestId=id;state.trainingOptionsOpen=false;save();go('trainingGrounds')}
+function trainingSetupValues(){const t=getTraining();return {activeMin:Math.max(1,Math.min(240,parseInt(document.getElementById('trainActive')?.value||t.activeMin)||25)),breakMin:Math.max(1,Math.min(120,parseInt(document.getElementById('trainBreak')?.value||t.breakMin)||5)),cycles:Math.max(1,Math.min(20,parseInt(document.getElementById('trainCycles')?.value||t.cycles)||4)),activity:document.getElementById('trainActivity')?.value||t.activity,longRestMin:Math.max(1,Math.min(120,parseInt(document.getElementById('trainLongRest')?.value||t.longRestMin)||15)),longRestEvery:Math.max(1,Math.min(20,parseInt(document.getElementById('trainLongEvery')?.value||t.longRestEvery)||4)),alarmSound:document.getElementById('trainAlarmSound')?.value||t.alarmSound,alarmRepeat:Math.max(1,Math.min(3,parseInt(document.getElementById('trainAlarmRepeat')?.value||t.alarmRepeat)||1)),pauseBeforeBreak:document.getElementById('trainPauseBreak')?.checked??t.pauseBeforeBreak,pauseBeforeActive:document.getElementById('trainPauseActive')?.checked??t.pauseBeforeActive}}
 function loadTrainingPreset(id){if(!id){state.selectedTrainingPreset=null;save();return}const p=state.trainingPresets.find(x=>x.id===id),t=getTraining();if(!p||t.running)return;Object.assign(t,{activeMin:p.activeMin,breakMin:p.breakMin,cycles:p.cycles,activity:p.activity,phase:'active',cycle:1,paused:false,pausedRemaining:p.activeMin*60});state.selectedTrainingPreset=id;save();render()}
 function saveTrainingPreset(){if(getTraining().running)return;const v=trainingSetupValues(),name=(prompt('Preset name:')||'').trim();if(!name)return;const p={id:'tp-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),name,...v};state.trainingPresets.push(p);state.selectedTrainingPreset=p.id;Object.assign(getTraining(),v,{phase:'active',cycle:1,paused:false,pausedRemaining:v.activeMin*60});save();render()}
 function updateTrainingPreset(){if(getTraining().running||!state.selectedTrainingPreset)return;const p=state.trainingPresets.find(x=>x.id===state.selectedTrainingPreset);if(!p)return;Object.assign(p,trainingSetupValues());save();render()}
@@ -874,9 +881,9 @@ function refreshTrainingControls(){
 }
 function startTraining(){
   const t=getTraining();if(t.running)return;
-  readTrainingSetup();primeTrainingAudio();
+  readTrainingSetup();primeTrainingAudio();if(!t.sessionStartedAt)t.sessionStartedAt=Date.now();
   if(t.waiting){
-    if(t.waitingFor==='break'){t.phase='break';t.pausedRemaining=t.breakMin*60}
+    if(t.waitingFor==='break'){t.phase='break';t.pausedRemaining=trainingBreakDuration(t).seconds}
     else{t.cycle++;t.phase='active';t.pausedRemaining=t.activeMin*60}
     t.waiting=false;t.waitingFor=null;
   }
@@ -890,7 +897,7 @@ function pauseTraining(){
   save();releaseTrainingWakeLock();refreshTrainingControls();
 }
 
-function resetTraining(){state.training=defaultTraining();save();releaseTrainingWakeLock();if(state.screen==='trainingGrounds')render();}
+function resetTraining(){recordTrainingSession('ended');const target=getTraining().targetQuestId;state.training=defaultTraining();state.training.targetQuestId=target;save();releaseTrainingWakeLock();if(state.screen==='trainingGrounds')render();}
 let trainingTicker=null;
 function startTrainingTicker(){clearInterval(trainingTicker);trainingTicker=setInterval(()=>{const t=syncTraining();if(!t.running){clearInterval(trainingTicker);trainingTicker=null}if(state.screen==='trainingGrounds')updateTrainingDOM();else updateTrainingIndicator()},1000)}
 function updateTrainingDOM(){
