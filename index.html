@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4W.5 Training Grounds Redesign</title>
+<title>Life Quest Prototype v4W.6 Due Soon + Recurring Quest Log</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -479,15 +479,17 @@ function questDeadline(q){
 }
 function dueSoonWindow(){
   const now=new Date();
-  const eligible=state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d);
-  const overdue=eligible.filter(x=>x.d<now);
-  if(overdue.length)return {days:3,items:overdue.sort((a,b)=>a.d-b.d).slice(0,2)};
+  const eligible=state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d).sort((a,b)=>a.d-b.d);
+  let chosenDays=7,all=[];
   for(const days of [3,5,7]){
     const limit=new Date(now.getTime()+days*86400000);
-    const items=eligible.filter(x=>x.d>=now&&x.d<=limit).sort((a,b)=>a.d-b.d);
-    if(items.length)return {days,items:items.slice(0,2)};
+    const population=eligible.filter(x=>x.d<now||x.d<=limit);
+    chosenDays=days;all=population;
+    if(population.length>=2)break;
   }
-  return {days:7,items:[]};
+  const overdue=all.filter(x=>x.d<now);
+  const upcoming=all.filter(x=>x.d>=now);
+  return {days:chosenDays,items:all.slice(0,2),allItems:all,overdue,upcoming};
 }
 function dueSoonQuests(){return dueSoonWindow().items.map(x=>x.q)}
 function focusChapterQuests(){
@@ -604,7 +606,7 @@ function focusView(){
   let body='';
   if(tab==='focus')body=chapter?`<div class="card"><div class="between"><div><strong>${esc(chapter.title)}</strong><div class="sub small">${esc(chapter.cornerstone)}</div></div><button class="btn" style="width:auto;margin:0" onclick="openHierarchyDetail('chapter','${chapter.id}')">Open Chapter</button></div></div>${fq.length?fq.map(focusQuestCard).join(''):'<div class="focus-empty">No non-repeatable Active Quests are waiting here.</div>'}<button class="btn primary" onclick="${state.subQuests.some(s=>s.chapterId===chapter.id)?`openCreateActiveQuest('${state.subQuests.find(s=>s.chapterId===chapter.id).id}')`:`openHierarchyDetail('chapter','${chapter.id}')`}">＋ Active Quest</button><button class="btn" onclick="go('focusChoose')">Change Focus Quest</button>`:`<div class="focus-empty">Choose a Chapter Quest to make it your Focus.</div><button class="btn primary" onclick="go('focusChoose')">Choose Focus Quest</button>`;
   else if(tab==='daily')body=`${daily.length?daily.map(dailyCard).join(''):'<div class="focus-empty">No recurring Quests scheduled for today.</div>'}<button class="btn" onclick="state.questLogFolder={kind:'recurring'};go('questList')">View All Recurring Quests</button>`;
-  else body=`${due.length?due.map(focusQuestCard).join(''):`<div class="focus-empty">Nothing due in the next ${dueSoonWindow().days} days.</div>`}${(()=>{const w=dueSoonWindow(),c=dueSummaryCounts();return `<div class="due-summary" onclick="go('dueList')">${c.overdue?c.overdue+' overdue · ':''}${c.dueToday?c.dueToday+' due today · ':''}${w.items.filter(x=>x.d>=new Date()).length} upcoming within ${w.days} days</div>`})()}`;
+  else body=`${due.length?due.map(focusQuestCard).join(''):`<div class="focus-empty">Nothing due in the next ${dueSoonWindow().days} days.</div>`}${(()=>{const w=dueSoonWindow(),c=dueSummaryCounts();return `<div class="due-summary" onclick="go('dueList')">${c.overdue?c.overdue+' overdue · ':''}${c.dueToday?c.dueToday+' due today · ':''}${w.upcoming.length} upcoming within ${w.days} days</div>`})()}`;
   return `<div class="screen focus-panel"><h2>Focus</h2><div class="tabs"><button class="tab ${tab==='due'?'active':''}" onclick="setFocusTab('due')">Due Soon</button><button class="tab ${tab==='focus'?'active':''}" onclick="setFocusTab('focus')">Focus</button><button class="tab ${tab==='daily'?'active':''}" onclick="setFocusTab('daily')">Daily</button></div>${body}</div>`;
 }
 function openRoutineFolder(seriesId){state.routineSeriesId=seriesId;save();go('routineFolder')}
@@ -856,22 +858,18 @@ function recordTrainingSession(reason='ended'){const t=getTraining();if(!t.sessi
 function trainingHistoryMarkup(){const h=(state.trainingHistory||[]).slice(0,12);if(!h.length)return `<div class="sub">No Training sessions recorded yet.</div>`;return h.map(x=>`<div class="routine-row"><div><b>${new Date(x.startedAt).toLocaleDateString()}</b>${x.presetName?` · ${esc(x.presetName)}`:''}</div><div class="sub small">${esc(x.activity||'Training')} · ${Math.max(1,Math.round((x.seconds||0)/60))} min${x.questTitle?` · ${esc(x.questTitle)}`:''}</div></div>`).join('')}
 function trainQuest(id){const q=getQuest(id);if(!q||q.completed)return;const t=getTraining();t.targetQuestId=id;state.trainingOptionsOpen=false;save();go('trainingGrounds')}
 function trainingSetupValues(){const t=getTraining();return {activeMin:Math.max(1,Math.min(240,parseInt(document.getElementById('trainActive')?.value||t.activeMin)||25)),breakMin:Math.max(1,Math.min(120,parseInt(document.getElementById('trainBreak')?.value||t.breakMin)||5)),cycles:Math.max(1,Math.min(20,parseInt(document.getElementById('trainCycles')?.value||t.cycles)||4)),activity:document.getElementById('trainActivity')?.value||t.activity,longRestMin:Math.max(1,Math.min(120,parseInt(document.getElementById('trainLongRest')?.value||t.longRestMin)||15)),longRestEvery:Math.max(1,Math.min(20,parseInt(document.getElementById('trainLongEvery')?.value||t.longRestEvery)||4)),alarmSound:document.getElementById('trainAlarmSound')?.value||t.alarmSound,alarmRepeat:Math.max(1,Math.min(3,parseInt(document.getElementById('trainAlarmRepeat')?.value||t.alarmRepeat)||1)),pauseBeforeBreak:document.getElementById('trainPauseBreak')?.checked??t.pauseBeforeBreak,pauseBeforeActive:document.getElementById('trainPauseActive')?.checked??t.pauseBeforeActive}}
-function loadTrainingPreset(id){if(!id){state.selectedTrainingPreset=null;save();return}const p=state.trainingPresets.find(x=>x.id===id),t=getTraining();if(!p||t.running)return;Object.assign(t,{activeMin:p.activeMin,breakMin:p.breakMin,cycles:p.cycles,activity:p.activity,phase:'active',cycle:1,paused:false,pausedRemaining:p.activeMin*60});state.selectedTrainingPreset=id;save();render()}
-function saveTrainingPreset(){if(getTraining().running)return;const v=trainingSetupValues(),name=(prompt('Preset name:')||'').trim();if(!name)return;const p={id:'tp-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),name,...v};state.trainingPresets.push(p);state.selectedTrainingPreset=p.id;Object.assign(getTraining(),v,{phase:'active',cycle:1,paused:false,pausedRemaining:v.activeMin*60});save();render()}
-function updateTrainingPreset(){if(getTraining().running||!state.selectedTrainingPreset)return;const p=state.trainingPresets.find(x=>x.id===state.selectedTrainingPreset);if(!p)return;Object.assign(p,trainingSetupValues());save();render()}
-function renameTrainingPreset(){const p=state.trainingPresets.find(x=>x.id===state.selectedTrainingPreset);if(!p)return;const name=(prompt('Preset name:',p.name)||'').trim();if(!name)return;p.name=name;save();render()}
-function deleteTrainingPreset(){const p=state.trainingPresets.find(x=>x.id===state.selectedTrainingPreset);if(!p)return;if(!confirm(`Delete preset "${p.name}"?`))return;state.trainingPresets=state.trainingPresets.filter(x=>x.id!==p.id);state.selectedTrainingPreset=null;save();render()}
-function previewTrainingSetup(){
-  const t=getTraining();if(t.running)return;
-  state.selectedTrainingPreset=null;
-  readTrainingSetup();
-  if(!t.paused){t.phase='active';t.cycle=1;t.pausedRemaining=t.activeMin*60}
-  save();
-  const c=document.getElementById('trainClock'),p=document.getElementById('trainPhase'),sc=document.getElementById('trainScene'),lab=document.getElementById('trainActivityLabel');
-  if(c)c.textContent=timerText(trainingRemaining(t));
-  if(p)p.textContent=`${t.phase==='active'?'ACTIVE':'BREAK'} · Cycle ${t.cycle} of ${t.cycles}`;
-  if(sc)sc.textContent=trainingScene(t);
-  if(lab)lab.textContent=trainingLabel(t.activity)+(t.activity==='adventure'?' · cosmetic preview':'');
+function loadTrainingPreset(id){
+  if(!id){state.selectedTrainingPreset=null;save();render();return}
+  const p=state.trainingPresets.find(x=>x.id===id),t=getTraining();if(!p||t.running)return;
+  Object.assign(t,{
+    activeMin:p.activeMin,breakMin:p.breakMin,cycles:p.cycles,activity:p.activity,
+    longRestMin:p.longRestMin??t.longRestMin,longRestEvery:p.longRestEvery??t.longRestEvery,
+    alarmSound:p.alarmSound||t.alarmSound,alarmRepeat:p.alarmRepeat||t.alarmRepeat,
+    pauseBeforeBreak:p.pauseBeforeBreak??t.pauseBeforeBreak,pauseBeforeActive:p.pauseBeforeActive??t.pauseBeforeActive,
+    soundOn:(p.alarmSound||t.alarmSound)!=='none',
+    phase:'active',cycle:1,paused:false,waiting:false,waitingFor:null,pausedRemaining:p.activeMin*60
+  });
+  state.selectedTrainingPreset=id;save();render()
 }
 function setTrainingTransitionOption(key,on){const t=getTraining();t[key]=!!on;save()}
 function refreshTrainingControls(){
@@ -1041,6 +1039,26 @@ function questHierarchyLabel(q){
 function questMatchesFilter(q,filter){
   return filter==='active'?!q.completed:filter==='completed'?!!q.completed:true
 }
+function recurringQuestLogOccurrences(filter=state.questTab||'all'){
+  ensureRecurringOccurrences();autoCloseExpiredRecurring();
+  const today=todayISO();
+  return state.quests.filter(q=>{
+    if(!isRecurring(q))return false;
+    const occurrenceDate=q.occurrenceDate||q.timeLimitDate||q.startDate||'';
+    if(filter==='active')return !q.completed&&occurrenceDate===today;
+    if(filter==='completed')return !!q.completed;
+    return !!q.completed||(!q.completed&&occurrenceDate===today);
+  }).sort((a,b)=>{
+    const ad=a.occurrenceDate||a.timeLimitDate||'',bd=b.occurrenceDate||b.timeLimitDate||'';
+    if(a.completed!==b.completed)return a.completed?1:-1;
+    return bd.localeCompare(ad);
+  });
+}
+function recurringQuestLogCard(q){
+  const date=q.occurrenceDate||q.timeLimitDate||'';
+  const status=q.completed?((q.autoClosed||q.resolvedMissed)?'Missed · 0/'+q.stars+' stars':'Completed · '+(q.earnedStars||0)+'/'+q.stars+' stars'):'Active today';
+  return `<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><div class="between"><strong>${esc(q.title)}</strong><span class="folder-meta">Recurring</span></div><div class="sub small">${esc(questHierarchyLabel(q))}</div><div class="sub small">${esc(status)}${date?' · '+esc(date):''}</div></div>`;
+}
 function questLogFlatResults(){
   const filter=state.questTab||'all',query=(state.questSearch||'').trim().toLowerCase(),roots=new Map();
   state.quests.filter(q=>!isRecurring(q)).forEach(q=>{const r=questLineageRoot(q);if(r)roots.set(r.id,r)});
@@ -1050,12 +1068,10 @@ function questLogFlatResults(){
   const normal=rows.map(({root,latest})=>`<div class="card quest-card ${latest.completed?'completed':''}" onclick="openLoggedQuest('${latest.id}',false)">
     <div class="between"><strong>${esc(latest.title)}</strong><span>${starDisplay(root.stars||latest.stars||0,cumulativeEarnedStars(root),latest.completed)}</span></div>
     <div class="sub small">${esc(questHierarchyLabel(latest))}</div><div class="sub small">${latest.completed?'Completed':'Active'}${latest.timeLimitDate?' · Due '+esc(latest.timeLimitDate):''}</div></div>`).join('');
-  const recurring=[];
-  recurringSeries().forEach((items,sid)=>{const latest=items.slice().sort((a,b)=>(b.occurrenceDate||'').localeCompare(a.occurrenceDate||''))[0];if(!latest)return;
-    const ok=filter==='active'?items.some(q=>!q.completed):filter==='completed'?items.some(q=>q.completed):true;
-    if(!ok)return;const text=[latest.title,'Recurring Quest',latest.repeat].join(' ').toLowerCase();if(query&&!text.includes(query))return;
-    recurring.push(`<div class="card quest-card" onclick="openRoutineFolder('${sid}')"><div class="between"><strong>${esc(latest.title)}</strong><span class="folder-meta">Recurring</span></div><div class="sub small">${esc(latest.repeat||'Recurring')} · ${items.filter(q=>!q.completed).length} unresolved</div></div>`)});
-  return normal+recurring.join('')||'<div class="card sub">No Quests match this view.</div>'
+  let recurring=recurringQuestLogOccurrences(filter);
+  if(query)recurring=recurring.filter(q=>questSearchText(q).includes(query)||[q.title,'Recurring Quest',q.repeat].join(' ').toLowerCase().includes(query));
+  const recurringRows=recurring.map(recurringQuestLogCard).join('');
+  return normal+recurringRows||'<div class="card sub">No Quests match this view.</div>'
 }
 function folderRelevantQuests(){
   const filter=state.questTab||'all';
@@ -1069,7 +1085,13 @@ function questLogFolderResults(){
     let out='';
     if(free.length)out+=`<div class="card quest-card" onclick="openQuestFolder('free')"><strong>Free Quests</strong><div class="sub small">${free.length} matching Quest${free.length===1?'':'s'}</div></div>`;
     if(corners.length)out+=`<div class="card quest-card" onclick="openQuestFolder('cornerstones')"><strong>Cornerstones</strong><div class="sub small">${corners.length} Cornerstone${corners.length===1?'':'s'} with matching Quests</div></div>`;
+    const recurring=recurringQuestLogOccurrences(state.questTab||'all');
+    if(recurring.length)out+=`<div class="card quest-card" onclick="openQuestFolder('recurring')"><strong>Recurring Quests</strong><div class="sub small">${recurring.length} matching occurrence${recurring.length===1?'':'s'}</div></div>`;
     return out||'<div class="card sub">No Quests match this view.</div>'
+  }
+  if(f.kind==='recurring'){
+    const recurring=recurringQuestLogOccurrences(state.questTab||'all');
+    return recurring.length?recurring.map(recurringQuestLogCard).join(''):'<div class="card sub">No matching recurring Quest occurrences.</div>'
   }
   if(f.kind==='free'){
     const freeSubs=freeSubQuests().filter(sub=>qs.some(q=>q.parentSubQuestId===sub.id));
