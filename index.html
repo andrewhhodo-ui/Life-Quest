@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4W.6 Due Soon + Recurring Quest Log</title>
+<title>Life Quest Prototype v4W.7 Priority + Streaks</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -118,6 +118,8 @@ textarea{min-height:86px}
 .training-indicator{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;width:min(calc(100vw - 24px),406px);z-index:9000;background:#17212b;border:1px solid var(--line);border-radius:12px;padding:9px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .training-indicator strong{font-size:13px}.training-indicator .sub{font-size:11px}
 .training-scene{text-align:center;font-size:48px;padding:18px 8px;min-height:92px}
+
+.streak-badge{cursor:default}.streak-at-risk{border-color:#b77b2d!important}.streak-flame{display:inline-block}.streak-pop{animation:streakPop .7s ease}.streak-overlay{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;background:#0009;padding:24px}.streak-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px 22px;text-align:center;max-width:320px;width:100%}.streak-big{font-size:64px;animation:streakPop .8s ease}.streak-sparks{font-size:22px;letter-spacing:12px;animation:streakSpark 1.1s ease both}@keyframes streakPop{0%{transform:scale(.65);opacity:.2}55%{transform:scale(1.2)}100%{transform:scale(1);opacity:1}}@keyframes streakSpark{0%{transform:translateY(10px);opacity:0}45%{opacity:1}100%{transform:translateY(-18px);opacity:0}}
 </style>
 
 <style id="v4u3-hotfix">
@@ -135,6 +137,7 @@ const DEFAULT={
   screen:'character',
   character:null,pendingCharacter:null,
   xp:0,coins:0,level:1,
+  streak:{count:0,lastQualifyingDate:null,lastGraceDate:null},streakCelebration:null,
   quests:[],tutorialQuests:[],
   currentQuest:null,resolutionStars:0,
   innerRingUnlocked:false,outerRingUnlocked:false,
@@ -165,6 +168,8 @@ state.placedBuildings=Array.isArray(state.placedBuildings)?state.placedBuildings
 state.trainingPresets=Array.isArray(state.trainingPresets)?state.trainingPresets:[];
 state.trainingHistory=Array.isArray(state.trainingHistory)?state.trainingHistory:[];
 state.trainingOptionsOpen=!!state.trainingOptionsOpen;
+state.streak=Object.assign({count:0,lastQualifyingDate:null,lastGraceDate:null},state.streak||{});
+state.quests.forEach(q=>{if(!q.priority)q.priority='Normal'});
 if(state.placedCornerstone&&state.placedCornerstone.hex!=null&&!state.placedCornerstones.length)state.placedCornerstones=[state.placedCornerstone];
 state.helpSeen=Object.assign({chapter:false,rarity:false},state.helpSeen||{});
 state.chapterCollapsed=state.chapterCollapsed||{};
@@ -239,7 +244,7 @@ function persistentNav(){
   </div>`
 }
 function renderDirect(html){
-  app().innerHTML=html+trainingIndicator()+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());startTrainingTicker();
+  app().innerHTML=html+trainingIndicator()+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav())+streakGracePrompt()+streakCelebration();startTrainingTicker();
 }
 function reset(){localStorage.removeItem(SAVE_KEY);state=JSON.parse(JSON.stringify(DEFAULT));render()}
 function app(){return document.getElementById('app')}
@@ -457,9 +462,45 @@ function arrival(){
     <div class="speech">Let's get started.</div>
   </div></div>`;
 }
+function calendarDiffDays(a,b){
+  if(!a||!b)return null;const [ay,am,ad]=a.split('-').map(Number),[by,bm,bd]=b.split('-').map(Number);return Math.round((Date.UTC(by,bm-1,bd)-Date.UTC(ay,am-1,ad))/86400000);
+}
+function streakStatus(){
+  const st=state.streak||{},today=todayISO();if(!st.lastQualifyingDate||!st.count)return {state:'none',count:0};
+  const gap=calendarDiffDays(st.lastQualifyingDate,today);
+  if(gap<=1)return {state:'active',count:st.count};
+  if(gap===2&&st.lastGraceDate!==st.lastQualifyingDate)return {state:'risk',count:st.count,missedDate:(()=>{const d=new Date(st.lastQualifyingDate+'T12:00:00');d.setDate(d.getDate()+1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`})()};
+  return {state:'broken',count:st.count};
+}
+function registerStreakCompletion(){
+  const today=todayISO(),st=state.streak||(state.streak={count:0,lastQualifyingDate:null,lastGraceDate:null});
+  if(st.lastQualifyingDate===today)return false;
+  const status=streakStatus();
+  if(status.state==='active'&&st.lastQualifyingDate){st.count=(st.count||0)+1}
+  else if(status.state==='risk'){return false}
+  else {st.count=1;st.lastGraceDate=null}
+  st.lastQualifyingDate=today;state.streakCelebration=st.count;return true;
+}
+function saveStreakGrace(){
+  const status=streakStatus();if(status.state!=='risk')return;
+  if((state.coins||0)<10){alert('You need 10 Coins to save this streak.');return}
+  state.coins-=10;state.streak.lastGraceDate=status.missedDate;
+  // Move the streak anchor across the protected day. It does not increment the streak.
+  state.streak.lastQualifyingDate=status.missedDate;
+  const completedToday=state.quests.some(q=>q.completed&&Number(q.earnedStars||0)>0&&q.completedAt&&q.completedAt.slice(0,10)===todayISO());
+  if(completedToday){state.streak.count=(state.streak.count||0)+1;state.streak.lastQualifyingDate=todayISO();state.streakCelebration=state.streak.count}
+  save();render();
+}
+function declineStreakGrace(){state.streak={count:0,lastQualifyingDate:null,lastGraceDate:null};save();render()}
+function streakGracePrompt(){
+  const s=streakStatus();if(s.state!=='risk')return '';
+  return `<div class="streak-overlay"><div class="streak-card"><div class="streak-big">🔥</div><h2>${s.count}-day streak at risk</h2><p class="sub">You missed yesterday. Save your streak for 🪙 10? Grace preserves the streak but does not add a day. You still need to complete a Quest today.</p><button class="btn primary" ${state.coins<10?'disabled':''} onclick="saveStreakGrace()">Save Streak — 10 Coins</button><button class="btn ghost" onclick="declineStreakGrace()">Let Streak End</button></div></div>`;
+}
+function streakCelebration(){const n=state.streakCelebration;if(!n)return '';return `<div class="streak-overlay" onclick="dismissStreakCelebration()"><div class="streak-card"><div class="streak-sparks">✦ ✦ ✦</div><div class="streak-big">🔥</div><h2>${n} DAY STREAK!</h2><p class="sub">Keep your adventure going.</p><button class="btn primary" onclick="event.stopPropagation();dismissStreakCelebration()">Continue</button></div></div>`}
+function dismissStreakCelebration(){state.streakCelebration=null;save();render()}
 function hud(){
   const pct=Math.max(0,Math.min(100,Math.round(xpIntoCurrentLevel()/xpNeededForNextLevel()*100)));
-  return `<div class="hud"><div class="badge"><strong>Lv ${state.level}</strong><div class="xpbar"><div class="xpfill" style="width:${pct}%"></div></div></div><div class="badge">${state.xp} XP · 🪙 ${state.coins}</div></div>`;
+  const ss=streakStatus();return `<div class="hud"><div class="badge"><strong>Lv ${state.level}</strong><div class="xpbar"><div class="xpfill" style="width:${pct}%"></div></div></div><div class="badge streak-badge ${ss.state==='risk'?'streak-at-risk':''}"><span class="streak-flame">🔥</span> ${ss.state==='broken'?0:ss.count||0}</div><div class="badge">${state.xp} XP · 🪙 ${state.coins}</div></div>`;
 }
 function focusText(){return currentTutorial()?'!':(state.focusChapterId?'Focus':'No Focus Quest')}
 function focusClick(){
@@ -479,7 +520,7 @@ function questDeadline(q){
 }
 function dueSoonWindow(){
   const now=new Date();
-  const eligible=state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d).sort((a,b)=>a.d-b.d);
+  const eligible=state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d).sort((a,b)=>(a.d-b.d)||priorityRank(a.q)-priorityRank(b.q));
   let chosenDays=7,all=[];
   for(const days of [3,5,7]){
     const limit=new Date(now.getTime()+days*86400000);
@@ -491,11 +532,12 @@ function dueSoonWindow(){
   const upcoming=all.filter(x=>x.d>=now);
   return {days:chosenDays,items:all.slice(0,2),allItems:all,overdue,upcoming};
 }
+function priorityRank(q){return q?.priority==='High'?0:q?.priority==='Low'?2:1}
 function dueSoonQuests(){return dueSoonWindow().items.map(x=>x.q)}
 function focusChapterQuests(){
   if(!state.focusChapterId)return [];
   const subs=new Set(state.subQuests.filter(s=>s.chapterId===state.focusChapterId).map(s=>s.id));
-  return state.quests.filter(q=>subs.has(q.parentSubQuestId)&&focusEligible(q)).sort(activeQuestSort).slice(0,3);
+  return state.quests.filter(q=>subs.has(q.parentSubQuestId)&&focusEligible(q)).sort((a,b)=>{const ad=questDeadline(a),bd=questDeadline(b),ao=ad&&ad<new Date(),bo=bd&&bd<new Date();if(ao!==bo)return ao?-1:1;const p=priorityRank(a)-priorityRank(b);if(p)return p;return activeQuestSort(a,b)}).slice(0,3);
 }
 function focusQuestCard(q){const d=questDeadline(q);const due=d?`${d<new Date()?'Overdue · ':''}${q.timeLimitDate}${q.timeLimitTime?' · '+q.timeLimitTime:' · End of day'}`:'No deadline';return `<div class="card" onclick="openLoggedQuest('${q.id}',false)"><div class="between"><strong>${esc(q.title)}</strong><span>${starDisplay(q.stars,q.earnedStars||0,q.completed)}</span></div><div class="sub small">${esc(due)}</div></div>`}
 function setFocusTab(tab){state.focusTab=tab;save();render()}
@@ -505,12 +547,11 @@ function dueSummaryCounts(){
   return {overdue:all.filter(x=>x.d<now).length,dueToday:all.filter(x=>x.q.timeLimitDate===today).length,next3:all.filter(x=>x.d>=now&&x.d<=limit).length};
 }
 function dueList(){
-  const now=new Date(),today=todayISO();
+  const now=new Date(),today=todayISO(),w=dueSoonWindow();
   const td=new Date();td.setDate(td.getDate()+1);const tomorrow=`${td.getFullYear()}-${String(td.getMonth()+1).padStart(2,'0')}-${String(td.getDate()).padStart(2,'0')}`;
-  const limit=new Date(now.getTime()+3*86400000);
-  const qs=state.quests.filter(q=>focusEligible(q)).map(q=>({q,d:questDeadline(q)})).filter(x=>x.d).sort((a,b)=>a.d-b.d);
-  const groups=[['Overdue',qs.filter(x=>x.d<now)],['Today',qs.filter(x=>x.q.timeLimitDate===today&&x.d>=now)],['Tomorrow',qs.filter(x=>x.q.timeLimitDate===tomorrow)],['Next 3 Days',qs.filter(x=>x.d>now&&x.d<=limit&&x.q.timeLimitDate!==today&&x.q.timeLimitDate!==tomorrow)]];
-  return `<div class="screen"><h2>Due Quests</h2>${groups.map(([name,items])=>items.length?`<h3>${name}</h3>${items.map(x=>focusQuestCard(x.q)).join('')}`:'').join('')||'<div class="focus-empty">No due Quests.</div>'}</div>`;
+  const qs=w.allItems;
+  const groups=[['Overdue',qs.filter(x=>x.d<now)],['Today',qs.filter(x=>x.q.timeLimitDate===today&&x.d>=now)],['Tomorrow',qs.filter(x=>x.q.timeLimitDate===tomorrow)],['Within '+w.days+' Days',qs.filter(x=>x.d>=now&&x.q.timeLimitDate!==today&&x.q.timeLimitDate!==tomorrow)]];
+  return `<div class="screen"><h2>Due Soon</h2><p class="sub">All eligible Quests in the current ${w.days}-day window.</p>${groups.map(([name,items])=>items.length?`<h3>${name}</h3>${items.map(x=>focusQuestCard(x.q)).join('')}`:'').join('')||'<div class="focus-empty">No due Quests.</div>'}</div>`;
 }
 
 function freshQuestId(){
@@ -756,6 +797,7 @@ function submitResolution(){
     if(rec&&!rec.completed){
       rec.completed=true;rec.earnedStars=earned;rec.completedAt=new Date().toISOString();
       addRewards(q.rootQuestId?rewardDelta:earned);
+      if(earned>0)registerStreakCompletion();
       if(rec.tutorialFree){state.requirements.freeQuestCompleted=true}
       if(rec.parentSubQuestId){
         state.requirements.childQuestCompleted=true;
@@ -939,7 +981,7 @@ function questEditor(mode='create', questId=null, defaults={}){
     <div class="field" id="cornerWrap" style="${type==='Cornerstone Quest'?'':'display:none'}"><label>Cornerstone</label><select id="qeCorner" ${defaults.lockHierarchy?'disabled':''} onchange="refreshQuestEditor('${mode}','${questId||''}',true)">${corners.map(c=>`<option value="${esc(c.name)}" ${c.name===corner?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
     <div class="field" id="chapterWrap" style="${type==='Cornerstone Quest'&&corner!=='Free Quest'?'':'display:none'}"><label>Chapter Quest</label><select id="qeChapter" ${defaults.lockHierarchy?'disabled':''} onchange="refreshQuestEditor('${mode}','${questId||''}',false,true)"><option value="">—</option>${chs.map(c=>`<option value="${c.id}" ${c.id===chapter?'selected':''}>${esc(c.title)}</option>`).join('')}</select></div>
     <div class="field" id="subWrap" style="${type==='Cornerstone Quest'?'':'display:none'}"><label>Sub-Quest</label><select id="qeSub" ${defaults.lockHierarchy?'disabled':''}><option value="">—</option>${subs.map(x=>`<option value="${x.id}" ${x.id===sub?'selected':''}>${esc(x.title)}</option>`).join('')}</select></div>
-    <div></div>
+    <div class="field" id="priorityWrap"><label>Priority</label><select id="qePriority">${['Low','Normal','High'].map(x=>`<option ${x===(q?.priority||defaults.priority||'Normal')?'selected':''}>${x}</option>`).join('')}</select></div>
     <div class="field full"><label>Title</label><input id="qeTitle" value="${esc(q?.title||defaults.title||'')}"></div>
     <div class="field full"><label>Description (Optional)</label><textarea id="qeDesc">${esc(q?.description||'')}</textarea></div>
     <div class="field"><label>Start Date</label><input id="qeStartDate" type="date" value="${q?.startDate||todayISO()}"></div><div class="field"><label>Start Time</label><input id="qeStartTime" type="time" value="${q?.startTime||currentTimeHM()}"></div>
@@ -970,7 +1012,7 @@ function toggleCustomReminder(){const on=document.getElementById('qeReminder')?.
 function pickEditorStars(n){createStars=n;document.querySelectorAll('#qeStars .star').forEach(el=>{const on=Number(el.dataset.n)<=n;el.classList.toggle('gold',on);el.classList.toggle('empty',!on)})}
 function refreshQuestEditor(mode,id,cornerChanged=false,chapterChanged=false){
   const type=document.getElementById('qeType')?.value||'Free Quest',corner=document.getElementById('qeCorner')?.value||'',chapter=document.getElementById('qeChapter')?.value||'',sub=document.getElementById('qeSub')?.value||'';
-  const prior=state.editorDefaults||{};const defaults={questType:type,cornerstone:corner,chapterId:cornerChanged?'':chapter,subQuestId:(cornerChanged||chapterChanged)?'':sub,title:document.getElementById('qeTitle')?.value||'',lockHierarchy:!!prior.lockHierarchy,returnType:prior.returnType,returnId:prior.returnId};state.editorDefaults=defaults;save();renderDirect(questEditor(mode,id,defaults))
+  const prior=state.editorDefaults||{};const defaults={questType:type,cornerstone:corner,chapterId:cornerChanged?'':chapter,subQuestId:(cornerChanged||chapterChanged)?'':sub,priority:document.getElementById('qePriority')?.value||'Normal',title:document.getElementById('qeTitle')?.value||'',lockHierarchy:!!prior.lockHierarchy,returnType:prior.returnType,returnId:prior.returnId};state.editorDefaults=defaults;save();renderDirect(questEditor(mode,id,defaults))
 }
 function saveQuestEditor(mode,id){
   const title=document.getElementById('qeTitle').value.trim();
@@ -986,6 +1028,7 @@ function saveQuestEditor(mode,id){
   const base={
     type:type==='Free Quest'?'Free Quest':'Quest',
     title,
+    priority:document.getElementById('qePriority')?.value||'Normal',
     description:document.getElementById('qeDesc').value.trim(),
     stars:createStars,
     startDate:document.getElementById('qeStartDate').value,
@@ -1005,7 +1048,7 @@ function saveQuestEditor(mode,id){
     const root=questLineageRoot(q);
     state.quests.filter(x=>(x.rootQuestId||x.id)===root.id).forEach(x=>{
       x.parentSubQuestId=base.parentSubQuestId;
-      x.type=base.type;
+      x.type=base.type;x.priority=base.priority;
     });
     if(isRecurring(q))propagateRecurringPlacement(q);
     save();state.currentQuest={kind:'quest',...q};go('questDetail');return;
