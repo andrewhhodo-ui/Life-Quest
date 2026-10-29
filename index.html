@@ -121,6 +121,12 @@ textarea{min-height:86px}
 
 .campfire-bright{filter:saturate(1.25);transform:scale(1.12)}.campfire-low{opacity:.62;transform:scale(.82);filter:saturate(.8)}.campfire-embers{font-size:28px!important;opacity:.8}.campfire-out{font-size:27px!important;opacity:.72;filter:grayscale(1)}
 .streak-badge{cursor:default}.streak-at-risk{border-color:#b77b2d!important}.streak-flame{display:inline-block}.streak-pop{animation:streakPop .7s ease}.streak-overlay{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;background:#0009;padding:24px}.streak-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px 22px;text-align:center;max-width:320px;width:100%}.streak-big{font-size:64px;animation:streakPop .8s ease}.streak-sparks{font-size:22px;letter-spacing:12px;animation:streakSpark 1.1s ease both}@keyframes streakPop{0%{transform:scale(.65);opacity:.2}55%{transform:scale(1.2)}100%{transform:scale(1);opacity:1}}@keyframes streakSpark{0%{transform:translateY(10px);opacity:0}45%{opacity:1}100%{transform:translateY(-18px);opacity:0}}
+
+.bulletin-shell{background:linear-gradient(90deg,#5a351d,#8a5a31 8%,#6b4225 92%,#4b2d1a);border:10px solid #5b351e;border-radius:14px;padding:10px;box-shadow:inset 0 0 0 2px #a8774d;min-height:560px;overflow:hidden;touch-action:pan-y}
+.bulletin-header{text-align:center;background:#efe3c2;color:#352315;font-weight:900;letter-spacing:1.5px;padding:9px;border:2px solid #7c5738;box-shadow:0 2px 5px #0005;margin-bottom:8px}
+.cork{position:relative;min-height:475px;background:radial-gradient(circle at 20% 30%,#c89455 0 1px,transparent 2px),radial-gradient(circle at 70% 60%,#9f6e3e 0 1px,transparent 2px),#b9834e;background-size:18px 18px,22px 22px;border:5px solid #80502d;overflow:hidden}
+.paper-note{position:absolute;width:112px;height:132px;background:#f5efdc;color:#5b5447;border:1px solid #d6ccb2;box-shadow:2px 4px 7px #0006;padding:10px;cursor:pointer;overflow:hidden}
+.paper-note.unread{outline:4px solid #6da8ff;box-shadow:0 0 14px #6da8ff,2px 4px 7px #0006}.paper-pin{position:absolute;top:5px;left:50%;transform:translateX(-50%);font-size:13px}.scribble{margin-top:20px;line-height:1.8;color:#817866;font-weight:700}.archive-box{position:absolute;right:12px;bottom:12px;background:#8a5b35;color:#fff3d6;border:3px solid #5c391f;padding:12px 14px;font-weight:900;box-shadow:2px 3px 5px #0006;cursor:pointer}.add-note-board{position:absolute;left:12px;bottom:12px}.board-dots{text-align:center;margin-top:8px;font-size:18px;letter-spacing:7px}.paper-detail{background:#f7f0da;color:#302a20;border:1px solid #d4c7a6;box-shadow:2px 5px 14px #0007;padding:24px;min-height:420px;line-height:1.55}.paper-detail h2{color:#302a20}.archive-list .card{cursor:pointer}
 </style>
 
 <style id="v4u3-hotfix">
@@ -139,6 +145,7 @@ const DEFAULT={
   character:null,pendingCharacter:null,
   xp:0,coins:0,level:1,
   streak:{count:0,lastQualifyingDate:null,lastGraceDate:null},streakCelebration:null,
+  announcements:[],bulletinPanel:'announcements',currentAnnouncementId:null,
   quests:[],tutorialQuests:[],
   currentQuest:null,resolutionStars:0,
   innerRingUnlocked:false,outerRingUnlocked:false,
@@ -170,6 +177,7 @@ state.trainingPresets=Array.isArray(state.trainingPresets)?state.trainingPresets
 state.trainingHistory=Array.isArray(state.trainingHistory)?state.trainingHistory:[];
 state.trainingOptionsOpen=!!state.trainingOptionsOpen;
 state.streak=Object.assign({count:0,lastQualifyingDate:null,lastGraceDate:null},state.streak||{});
+state.announcements=Array.isArray(state.announcements)?state.announcements:[];state.bulletinPanel=state.bulletinPanel||'announcements';
 state.quests.forEach(q=>{if(!q.priority)q.priority='Normal'});
 if(state.placedCornerstone&&state.placedCornerstone.hex!=null&&!state.placedCornerstones.length)state.placedCornerstones=[state.placedCornerstone];
 state.helpSeen=Object.assign({chapter:false,rarity:false},state.helpSeen||{});
@@ -225,7 +233,8 @@ function navBack(){
   let h=null;
   while(state.navHistory.length&&!h){
     const candidate=state.navHistory.pop();
-    if(candidate?.screen!=='questDetail'&&!['resolve','reward'].includes(candidate?.screen))h=candidate;
+    const transient=['resolve','reward','createMenu','createQuestMenu','createBuildingMenu','placeBuilding','cornerstonePick','placeCornerstone','cornerstoneCreateMenu','createChapter','createSubQuest','createChildQuest','createQuest','extendQuest'];
+    if(candidate?.screen!=='questDetail'&&!transient.includes(candidate?.screen))h=candidate;
   }
   if(!h){state.screen='home';save();render();return}
   restoreSnapshot(h);save();render()
@@ -799,12 +808,13 @@ function reward(){return `<div class="screen center"><div style="font-size:50px"
 
 function createMenu(){return `<div class="screen"><h2>Create</h2><div class="card"><button class="btn primary" onclick="go('createQuestMenu')">＋ Quest</button><button class="btn" onclick="go('createBuildingMenu')">＋ Building</button></div></div>`;}
 function createQuestMenu(){return `<div class="screen"><h2>Create Quest</h2><div class="card"><button class="btn primary" onclick="state.editorDefaults={questType:'Free Quest'};go('createQuest')">＋ Free Quest</button><button class="btn" ${state.requirements.cornerstonePlaced?'':'disabled'} onclick="go('createChapter')">＋ Chapter Quest ${state.requirements.cornerstonePlaced?'':'🔒'}</button><button class="btn" onclick="state.subQuestDefaults=null;go('createSubQuest')">＋ Sub-Quest</button><button class="btn" ${state.subQuests.length?'':'disabled'} onclick="state.editorDefaults={questType:'Cornerstone Quest',cornerstone:'Free Quest'};go('createQuest')">＋ Active Quest ${state.subQuests.length?'':'🔒'}</button></div><button class="btn ghost" onclick="go('createMenu')">Back</button></div>`;}
-function createBuildingMenu(){const canCorner=canPlaceCornerstone(),hasTraining=state.placedBuildings.some(b=>b.type==='training');return `<div class="screen"><h2>Create Building</h2><div class="card"><button class="btn primary" ${canCorner?'':'disabled'} onclick="go('cornerstonePick')">＋ Cornerstone ${canCorner?'':'🔒'}</button><button class="btn" onclick="${hasTraining?'openTrainingGrounds()':"beginBuildingPlacement('training')"}">${hasTraining?'⚔️ Open Training Grounds':'＋ Training Grounds'}</button><button class="btn" disabled>Reward Shop 🔒 · Level TBD</button><button class="btn" disabled>Arcade 🔒 · Level TBD</button><button class="btn" disabled>Chronicle 🔒 · Level TBD</button></div><div class="sub small">Unlock order: Training Grounds → Reward Shop → Arcade → Chronicle.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;}
+function createBuildingMenu(){const canCorner=canPlaceCornerstone(),hasBulletin=state.placedBuildings.some(b=>b.type==='bulletin'),hasTraining=state.placedBuildings.some(b=>b.type==='training');return `<div class="screen"><h2>Create Building</h2><div class="card"><button class="btn primary" ${canCorner?'':'disabled'} onclick="go('cornerstonePick')">＋ Cornerstone ${canCorner?'':'🔒'}</button><button class="btn" onclick="${hasBulletin?'openBulletinBoard()':"beginBuildingPlacement('bulletin')"}">${hasBulletin?'📌 Open Bulletin Board':'＋ Bulletin Board'}</button><button class="btn" onclick="${hasTraining?'openTrainingGrounds()':"beginBuildingPlacement('training')"}">${hasTraining?'⚔️ Open Training Grounds':'＋ Training Grounds'}</button><button class="btn" disabled>Reward Shop 🔒 · Level TBD</button><button class="btn" disabled>Arcade 🔒 · Level TBD</button><button class="btn" disabled>Chronicle 🔒 · Level TBD</button></div><div class="sub small">Building progression: Bulletin Board → Training Grounds → Reward Shop → Arcade → Chronicle.</div><button class="btn ghost" onclick="navBack()">Back</button></div>`;}
 
 
-const BUILDING_TYPES={training:{name:'Training Grounds',icon:'⚔️'}};
+const BUILDING_TYPES={bulletin:{name:'Bulletin Board',icon:'📌'},training:{name:'Training Grounds',icon:'⚔️'}};
 function beginBuildingPlacement(type){
   if(type==='training'&&state.placedBuildings.some(b=>b.type==='training')){openTrainingGrounds();return}
+  if(type==='bulletin'&&state.placedBuildings.some(b=>b.type==='bulletin')){openBulletinBoard();return}
   if(!emptyHexes().length){alert('There are no empty unlocked hexes available.');return}
   state.pendingBuilding=type;save();go('placeBuilding');
 }
@@ -815,9 +825,9 @@ function placeBuilding(){
 function commitBuilding(hex){
   const type=state.pendingBuilding,def=BUILDING_TYPES[type];if(!def||occupiedAt(hex))return;
   state.placedBuildings.push({id:'b-'+Date.now(),type,name:def.name,icon:def.icon,hex,createdAt:new Date().toISOString()});
-  state.pendingBuilding=null;state.selectedHex=null;save();openTrainingGrounds();
+  state.pendingBuilding=null;state.selectedHex=null;save();if(type==='bulletin')openBulletinBoard();else openTrainingGrounds();
 }
-function openBuilding(hex){const b=buildingAt(hex);if(b?.type==='training')openTrainingGrounds()}
+function openBuilding(hex){const b=buildingAt(hex);if(b?.type==='training')openTrainingGrounds();if(b?.type==='bulletin')openBulletinBoard()}
 function openTrainingGrounds(){syncTraining();go('trainingGrounds')}
 function defaultTraining(){return {running:false,paused:false,waiting:false,waitingFor:null,phase:'active',activeMin:25,breakMin:5,cycles:4,cycle:1,activity:'adventure',soundOn:true,alarmSound:'adventureBell',alarmRepeat:1,longRestMin:15,longRestEvery:4,pauseBeforeBreak:false,pauseBeforeActive:false,phaseStartedAt:null,phaseEndsAt:null,pausedRemaining:25*60,targetQuestId:null,sessionStartedAt:null};}
 function getTraining(){if(!state.training)state.training=defaultTraining();const t=state.training;if(t.soundOn==null)t.soundOn=true;if(!t.alarmSound)t.alarmSound='adventureBell';if(!t.alarmRepeat)t.alarmRepeat=1;if(t.longRestMin==null)t.longRestMin=15;if(t.longRestEvery==null)t.longRestEvery=4;if(t.pauseBeforeBreak==null)t.pauseBeforeBreak=false;if(t.pauseBeforeActive==null)t.pauseBeforeActive=false;if(t.waiting==null)t.waiting=false;if(t.targetQuestId===undefined)t.targetQuestId=null;if(t.sessionStartedAt===undefined)t.sessionStartedAt=null;return t}
@@ -1084,6 +1094,7 @@ function recurringQuestLogCard(q){
   const status=q.completed?((q.autoClosed||q.resolvedMissed)?'Missed · 0/'+q.stars+' stars':'Completed · '+(q.earnedStars||0)+'/'+q.stars+' stars'):'Active today';
   return `<div class="card quest-card ${q.completed?'completed':''}" onclick="openLoggedQuest('${q.id}',false)"><div class="between"><strong>${esc(q.title)}</strong><span class="folder-meta">Recurring</span></div><div class="sub small">${esc(questHierarchyLabel(q))}</div><div class="sub small">${esc(status)}${date?' · '+esc(date):''}</div></div>`;
 }
+function questActivityTime(q){return new Date(q.completedAt||q.updatedAt||q.createdAt||0).getTime()||0}
 function questLogFlatResults(){
   const filter=state.questTab||'all',query=(state.questSearch||'').trim().toLowerCase(),roots=new Map();
   state.quests.filter(q=>!isRecurring(q)).forEach(q=>{const r=questLineageRoot(q);if(r)roots.set(r.id,r)});
@@ -1091,28 +1102,12 @@ function questLogFlatResults(){
   if(query)rows=rows.filter(x=>questSearchText(x.latest).includes(query));
   let recurring=recurringQuestLogOccurrences(filter);
   if(query)recurring=recurring.filter(q=>questSearchText(q).includes(query)||[q.title,'Recurring Quest',q.repeat].join(' ').toLowerCase().includes(query));
-
-  // Completed view is one chronological history: newest resolved/completed Quest first,
-  // regardless of whether the Quest is Free, Active, reopened, or recurring.
-  if(filter==='completed'){
-    const completedItems=[];
-    rows.forEach(({root,latest})=>completedItems.push({
-      completedAt:latest.completedAt||'',
-      html:`<div class="card quest-card completed" onclick="openLoggedQuest('${latest.id}',false)">
-        <div class="between"><strong>${esc(latest.title)}</strong><span>${starDisplay(root.stars||latest.stars||0,cumulativeEarnedStars(root),true)}</span></div>
-        <div class="sub small">${esc(questHierarchyLabel(latest))}</div><div class="sub small">Completed${latest.timeLimitDate?' · Due '+esc(latest.timeLimitDate):''}</div></div>`
-    }));
-    recurring.forEach(q=>completedItems.push({completedAt:q.completedAt||'',html:recurringQuestLogCard(q)}));
-    completedItems.sort((a,b)=>new Date(b.completedAt||0)-new Date(a.completedAt||0));
-    return completedItems.map(x=>x.html).join('')||'<div class="card sub">No Quests match this view.</div>';
-  }
-
-  rows.sort((a,b)=>a.latest.completed-b.latest.completed||(a.latest.timeLimitDate||'9999').localeCompare(b.latest.timeLimitDate||'9999'));
-  const normal=rows.map(({root,latest})=>`<div class="card quest-card ${latest.completed?'completed':''}" onclick="openLoggedQuest('${latest.id}',false)">
-    <div class="between"><strong>${esc(latest.title)}</strong><span>${starDisplay(root.stars||latest.stars||0,cumulativeEarnedStars(root),latest.completed)}</span></div>
-    <div class="sub small">${esc(questHierarchyLabel(latest))}</div><div class="sub small">${latest.completed?'Completed':'Active'}${latest.timeLimitDate?' · Due '+esc(latest.timeLimitDate):''}</div></div>`).join('');
-  const recurringRows=recurring.map(recurringQuestLogCard).join('');
-  return normal+recurringRows||'<div class="card sub">No Quests match this view.</div>'
+  rows.sort((a,b)=>questActivityTime(b.latest)-questActivityTime(a.latest));
+  const normal=rows.map(({root,latest})=>`<div class="card quest-card ${latest.completed?'completed':''}" onclick="openLoggedQuest('${latest.id}',false)"><div class="between"><strong>${esc(latest.title)}</strong><span>${starDisplay(root.stars||latest.stars||0,cumulativeEarnedStars(root),latest.completed)}</span></div><div class="sub small">${esc(questHierarchyLabel(latest))}</div><div class="sub small">${latest.completed?'Completed':'Active'}${latest.timeLimitDate?' · Due '+esc(latest.timeLimitDate):''}</div></div>`).join('');
+  // Search remains direct. Otherwise recurring occurrences are tucked into one Flat View folder.
+  if(query){recurring.sort((a,b)=>questActivityTime(b)-questActivityTime(a));return normal+recurring.map(recurringQuestLogCard).join('')||'<div class="card sub">No Quests match this view.</div>'}
+  const recurringFolder=recurring.length?`<div class="card quest-card" onclick="state.questLogFolder={kind:'recurring'};save();render()"><div class="between"><strong>↻ Recurring Quests</strong><span>${recurring.length}</span></div><div class="sub small">Open recurring occurrences</div></div>`:'';
+  return normal+recurringFolder||'<div class="card sub">No Quests match this view.</div>'
 }
 function folderRelevantQuests(){
   const filter=state.questTab||'all';
@@ -1162,6 +1157,7 @@ function questLogFolderResults(){
 }
 function questLogResults(){
   if((state.questSearch||'').trim())return questLogFlatResults();
+  if(state.questLogFolder?.kind==='recurring')return questLogFolderResults();
   return state.questLogView==='folder'?questLogFolderResults():questLogFlatResults()
 }
 function setQuestSearch(v){state.questSearch=v;save();const el=document.getElementById('questLogResults');if(el)el.innerHTML=questLogResults()}
@@ -1172,7 +1168,7 @@ function toggleQuestLogView(){
   save();render()
 }
 function questList(){
-  syncTutorial();const folder=state.questLogView==='folder'&&state.questLogFolder&&!state.questSearch;
+  syncTutorial();const folder=!!state.questLogFolder&&!state.questSearch;
   return `<div class="screen"><h2>Quest Log</h2>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input id="questSearchInput" aria-label="Search Quests" placeholder="Search Quests" value="${esc(state.questSearch||'')}" oninput="setQuestSearch(this.value)" style="flex:1">${state.questSearch?`<button class="btn ghost" style="width:auto;margin:0" onclick="clearQuestSearch()">Clear</button>`:''}</div>
     <div class="tabs"><button class="tab ${(state.questTab||'all')==='all'?'active':''}" onclick="state.questTab='all';save();render()">All</button><button class="tab ${state.questTab==='active'?'active':''}" onclick="state.questTab='active';save();render()">Active</button><button class="tab ${state.questTab==='completed'?'active':''}" onclick="state.questTab='completed';save();render()">Completed</button></div>
@@ -1266,7 +1262,7 @@ function cornerstoneLanding(){
  const c=state.placedCornerstone;if(!c)return home();const chapters=orderedChapters(c.name);
  return `<div class="screen"><div class="between"><h2>${c.icon} ${esc(c.name)}</h2><span>${state.constructionStage?'🏗️':''}</span></div>
  ${chapters.length?chapters.map(ch=>{const collapsed=!!state.chapterCollapsed[ch.id];return `<div class="chapter-row" data-chapter-id="${ch.id}" ondragover="event.preventDefault()" ondrop="chapterDrop(event,'${ch.id}','${esc(c.name)}')"><span class="drag-handle" draggable="true" ondragstart="chapterDragStart(event,'${ch.id}')" onpointerdown="beginPointerReorder(event,'chapter','${ch.id}')" onpointermove="movePointerReorder(event)" onpointerup="endPointerReorder(event)" onpointercancel="endPointerReorder(event)">≡</span><div class="card chapter-main" onclick="openHierarchyDetail('chapter','${ch.id}')"><div class="between"><strong>${esc(ch.title)}</strong><span>${esc(ch.archetype)}</span></div><div class="progress"><div style="width:${ch.progress||0}%"></div></div><div class="sub small">${ch.progress||0}% complete</div>${collapsed?'':`<div class="chapter-subscroll">${renderSubTree(ch.id)}</div>`}</div><div class="chapter-controls"><button onclick="toggleChapterCollapsed('${ch.id}',event)">${collapsed?'⌄':'⌃'}</button></div></div>`}).join(''):'<div class="card sub">No Chapter Quests yet.</div>'}
- <button class="btn primary" onclick="go('cornerstoneCreateMenu')">＋ Create Quest</button><button class="btn" onclick="moveCornerstone()">Move Cornerstone</button><button class="btn danger" onclick="tearDownCornerstone()">Tear Down</button></div>`;
+ <button class="btn primary" onclick="go('cornerstoneCreateMenu')">＋ Create Quest</button><button class="btn" onclick="moveCornerstone()">Move Cornerstone</button><button class="btn danger" onclick="tearDownCornerstone()">Tear Down</button><button class="btn ghost" onclick="navHome()">← Back to Settlement</button></div>`;
 }
 const SUBQUEST_RARITIES=['Common','Uncommon','Rare','Epic','Legendary'];
 const SUBQUEST_RARITY_HELP={
@@ -1410,6 +1406,7 @@ function openHierarchyDetail(type,id,returnType=null,returnId=null){
   state.hierarchyView={type,id};
   save();go('hierarchyDetail');
 }
+function hierarchyTierBack(type,id){if(type==='sub'){const sub=state.subQuests.find(x=>x.id===id);if(sub){state.hierarchyView={type:'chapter',id:sub.chapterId};save();render();return}}go('cornerstoneLanding')}
 function hierarchyDetail(){
   const type=state.hierarchyView?.type,id=state.hierarchyView?.id;
   if(!type||!id)return home();
@@ -1432,6 +1429,7 @@ function hierarchyDetail(){
       ${completedQuests.length?`<div class="card quest-card" style="margin-top:12px" onclick="openCompletedQuestFolder('${id}')"><div class="between"><strong>📁 Completed Quests</strong><span>${completedQuests.length}</span></div><div class="sub small">View completed Active Quests</div></div>`:''}</div>`}
     <button class="btn" onclick="${type==='chapter'?`editChapterQuest('${id}')`:`editSubQuest('${id}')`}">Edit Quest</button>
     <button class="btn primary" onclick="alert('Chapter/Sub-Quest completion will use the universal completion survey.')">Complete Quest</button>
+    <button class="btn ghost" onclick="hierarchyTierBack('${type}','${id}')">← Back to ${type==='sub'?'Chapter Quest':'Cornerstone'}</button>
     </div>`;
 }
 function createChapter(){
@@ -1494,10 +1492,30 @@ function updateChapterProgress(subId){
   const q=state.quests.filter(x=>x.parentSubQuestId===sub.id);chapter.progress=q.length?Math.round(q.filter(x=>x.completed).length/q.length*100):0;
 }
 
+
+function openBulletinBoard(){state.bulletinPanel=state.bulletinPanel||'announcements';save();go('bulletinBoard')}
+function addAnnouncement({kind='system',title='Announcement',body='',questId=null}={}){state.announcements.push({id:'a-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),kind,title,body,questId,createdAt:new Date().toISOString(),read:false,archived:false});save()}
+function ensureMissedRecurringAnnouncements(){
+  const groups={};state.quests.filter(q=>isRecurring(q)&&q.occurrenceDate).forEach(q=>{const sid=q.seriesId||q.id;(groups[sid]??=[]).push(q)});
+  Object.entries(groups).forEach(([sid,arr])=>{arr.sort((a,b)=>(a.occurrenceDate||'').localeCompare(b.occurrenceDate||''));let run=0,last=null;for(const q of arr){const missed=!!q.completed&&(q.autoClosed||q.resolvedMissed||(q.earnedStars||0)===0);run=missed?run+1:0;if(run===3)last=q}if(last&&!state.announcements.some(a=>a.missSeriesId===sid&&a.missThreshold===3)){state.announcements.push({id:'a-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),kind:'system',title:'Quest Pattern Noticed',body:`You've missed ${last.title} for the last three scheduled occurrences.`,questId:last.id,missSeriesId:sid,missThreshold:3,createdAt:new Date().toISOString(),read:false,archived:false})}});save();
+}
+function bulletinPapers(kind){return state.announcements.filter(a=>a.kind===kind&&!a.archived)}
+function paperStyle(i){const pos=[[7,7,-4],[40,9,3],[18,34,2],[52,38,-3],[5,61,4],[38,65,-2]];const p=pos[i%pos.length];return `left:${p[0]}%;top:${p[1]}%;transform:rotate(${p[2]}deg);z-index:${i+1}`}
+function openAnnouncement(id){const a=state.announcements.find(x=>x.id===id);if(!a)return;a.read=true;state.currentAnnouncementId=id;save();go('announcementDetail')}
+function setBulletinPanel(panel){state.bulletinPanel=panel;save();render()}
+let bulletinTouchX=null;function bulletinTouchStart(e){bulletinTouchX=e.touches?.[0]?.clientX??null}function bulletinTouchEnd(e){if(bulletinTouchX==null)return;const dx=(e.changedTouches?.[0]?.clientX??bulletinTouchX)-bulletinTouchX;bulletinTouchX=null;if(Math.abs(dx)<45)return;setBulletinPanel(dx<0?'notes':'announcements')}
+function bulletinBoard(){ensureMissedRecurringAnnouncements();const kind=state.bulletinPanel==='notes'?'personal':'system',papers=bulletinPapers(kind),title=kind==='system'?'ANNOUNCEMENTS':'NOTES TO SELF';return `<div class="screen"><h2>Bulletin Board</h2><div class="bulletin-shell" ontouchstart="bulletinTouchStart(event)" ontouchend="bulletinTouchEnd(event)"><div class="bulletin-header">${title}</div><div class="cork">${papers.map((a,i)=>`<div class="paper-note ${a.read?'':'unread'}" style="${paperStyle(i)}" onclick="openAnnouncement('${a.id}')"><span class="paper-pin">●</span><div class="scribble">━━━━<br>━━━━━━<br>━━━<br>━━━━━</div></div>`).join('')}${kind==='personal'?`<button class="btn add-note-board" style="width:auto" onclick="createPersonalNote()">＋ Note</button>`:''}<div class="archive-box" onclick="go('announcementArchive')">ARCHIVE</div></div><div class="board-dots">${kind==='system'?'● ○':'○ ●'}</div></div><div class="sub small center">Swipe left/right to switch panels.</div><button class="btn ghost" onclick="navHome()">← Back to Settlement</button></div>`}
+function createPersonalNote(){const title=prompt('Note title');if(!title)return;const body=prompt('Note to self')||'';addAnnouncement({kind:'personal',title,body});state.bulletinPanel='notes';render()}
+function archiveAnnouncement(id){const a=state.announcements.find(x=>x.id===id);if(!a)return;a.archived=true;save();go('bulletinBoard')}
+function discardAnnouncement(id){if(!confirm('Discard this announcement? This permanently removes it.'))return;state.announcements=state.announcements.filter(x=>x.id!==id);save();go('bulletinBoard')}
+function announcementDetail(){const a=state.announcements.find(x=>x.id===state.currentAnnouncementId);if(!a)return bulletinBoard();return `<div class="screen"><div class="paper-detail"><h2>${esc(a.title)}</h2><p>${esc(a.body)}</p>${a.questId?`<button class="btn" onclick="openLoggedQuest('${a.questId}',false)">View Quest</button>`:''}${a.kind==='personal'?`<button class="btn" onclick="alert('Turn into Quest will open the universal Quest creator in a later pass.')">Turn into Quest</button>`:''}</div><button class="btn" onclick="archiveAnnouncement('${a.id}')">Archive</button><button class="btn danger" onclick="discardAnnouncement('${a.id}')">Discard</button><button class="btn ghost" onclick="go('bulletinBoard')">Back to Bulletin Board</button></div>`}
+function announcementArchive(){const arr=state.announcements.filter(a=>a.archived).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return `<div class="screen archive-list"><h2>Archive</h2>${arr.length?arr.map(a=>`<div class="card" onclick="state.currentAnnouncementId='${a.id}';save();go('announcementDetail')"><strong>${esc(a.title)}</strong><div class="sub small">${a.kind==='system'?'Announcement':'Note to Self'} · ${new Date(a.createdAt).toLocaleDateString()}</div></div>`).join(''):'<div class="card sub">Nothing archived yet.</div>'}<button class="btn ghost" onclick="go('bulletinBoard')">Back to Bulletin Board</button></div>`}
+
 function menu(){return `<div class="screen"><h2>Menu</h2><div class="card"><button class="btn" onclick="go('home')">Return to Settlement</button><button class="btn ghost" onclick="if(confirm('Reset all prototype progress and start over?'))reset()">Reset Prototype / Start Over</button></div></div>`}
 
 function render(){
-  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,editCompletion,createMenu,createQuestMenu,createBuildingMenu,placeBuilding,trainingGrounds,hierarchyDetail,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,routineFolder,completedQuestFolder,extendQuest,menu};
+  ensureMissedRecurringAnnouncements();
+  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,editCompletion,createMenu,createQuestMenu,createBuildingMenu,placeBuilding,trainingGrounds,bulletinBoard,announcementDetail,announcementArchive,hierarchyDetail,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,routineFolder,completedQuestFolder,extendQuest,menu};
   const page=(map[state.screen]||home)();
   app().innerHTML=page+trainingIndicator()+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());startTrainingTicker();
 }
