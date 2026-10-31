@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Life Quest Prototype v4W.8 Campfire</title>
+<title>Life Quest Prototype v4W.11</title>
 <style>
 :root{
   --bg:#0d1218;--panel:#18202a;--panel2:#222d39;--text:#eef3f7;--muted:#93a4b8;
@@ -126,7 +126,7 @@ textarea{min-height:86px}
 .bulletin-header{text-align:center;background:#efe3c2;color:#352315;font-weight:900;letter-spacing:1.5px;padding:9px;border:2px solid #7c5738;box-shadow:0 2px 5px #0005;margin-bottom:8px}
 .cork{position:relative;min-height:475px;background:radial-gradient(circle at 20% 30%,#c89455 0 1px,transparent 2px),radial-gradient(circle at 70% 60%,#9f6e3e 0 1px,transparent 2px),#b9834e;background-size:18px 18px,22px 22px;border:5px solid #80502d;overflow:hidden}
 .paper-note{position:absolute;width:112px;height:132px;background:#f5efdc;color:#5b5447;border:1px solid #d6ccb2;box-shadow:2px 4px 7px #0006;padding:10px;cursor:pointer;overflow:hidden}
-.paper-note.unread{outline:4px solid #6da8ff;box-shadow:0 0 14px #6da8ff,2px 4px 7px #0006}.paper-pin{position:absolute;top:5px;left:50%;transform:translateX(-50%);font-size:13px}.scribble{margin-top:20px;line-height:1.8;color:#817866;font-weight:700}.archive-box{position:absolute;right:12px;bottom:12px;background:#8a5b35;color:#fff3d6;border:3px solid #5c391f;padding:12px 14px;font-weight:900;box-shadow:2px 3px 5px #0006;cursor:pointer}.add-note-board{position:absolute;left:12px;bottom:12px}.board-dots{text-align:center;margin-top:8px;font-size:18px;letter-spacing:7px}.paper-detail{background:#f7f0da;color:#302a20;border:1px solid #d4c7a6;box-shadow:2px 5px 14px #0007;padding:24px;min-height:420px;line-height:1.55}.paper-detail h2{color:#302a20}.archive-list .card{cursor:pointer}
+.paper-note.unread{outline:4px solid #6da8ff;box-shadow:0 0 14px #6da8ff,2px 4px 7px #0006}.paper-pin{position:absolute;top:5px;left:50%;transform:translateX(-50%);font-size:13px}.scribble{margin-top:20px;line-height:1.8;color:#817866;font-weight:700}.archive-box{position:absolute;right:12px;bottom:12px;background:#8a5b35;color:#fff3d6;border:3px solid #5c391f;padding:12px 14px;font-weight:900;box-shadow:2px 3px 5px #0006;cursor:pointer}.add-note-board{position:absolute;left:12px;bottom:12px}.board-dots{text-align:center;margin-top:8px;font-size:18px;letter-spacing:7px}.paper-detail{background:#f7f0da;color:#302a20;border:1px solid #d4c7a6;box-shadow:2px 5px 14px #0007;padding:24px;min-height:420px;line-height:1.55}.paper-detail h2{color:#302a20}.paper-detail img{display:block;max-width:100%;max-height:320px;object-fit:contain;margin:16px auto;border:1px solid #c8b993;box-shadow:1px 3px 8px #0004}.paper-photo-mark{position:absolute;right:8px;bottom:7px;font-size:20px}.note-image-preview{display:none;max-width:100%;max-height:220px;object-fit:contain;margin-top:10px;border-radius:8px}.archive-list .card{cursor:pointer}
 </style>
 
 <style id="v4u3-hotfix">
@@ -478,7 +478,8 @@ function calendarDiffDays(a,b){
 function streakStatus(){
  const st=state.streak||{},today=todayISO(); if(!st.lastQualifyingDate||!st.count)return {state:'none',fire:'extinguished',count:0};
  const gap=calendarDiffDays(st.lastQualifyingDate,today);
- if(gap<=0)return {state:'active',fire:'bright',count:st.count,gap};
+ if(st.lastQualifyingDate===today)return {state:'active',fire:'bright',count:st.count,gap:0};
+ if(gap<=0)return {state:'active',fire:'low',count:st.count,gap};
  if(gap===1)return {state:'active',fire:'low',count:st.count,gap};
  if(gap===2)return {state:'active',fire:'embers',count:st.count,gap};
  if(gap===3)return {state:st.lastGraceDate===today?'protected':'risk',fire:'extinguished',count:st.count,gap};
@@ -595,7 +596,7 @@ repairRecurringIntegrity();
 repairMovedRecurringSeries();
 
 function scheduledOnDate(q,dateISO){
-  if(!isRecurring(q))return false;const d=new Date(dateISO+'T12:00:00'),start=new Date((q.seriesStartDate||q.startDate||dateISO)+'T12:00:00');if(d<start)return false;
+  if(!isRecurring(q))return false;const d=new Date(dateISO+'T12:00:00'),start=new Date((q.seriesStartDate||q.startDate||dateISO)+'T12:00:00');if(d<start)return false;if(q.repeatEndDate&&dateISO>q.repeatEndDate)return false;
   if(q.repeat==='Daily')return true;
   if(q.repeat==='Weekly')return d.getDay()===start.getDay();
   if(q.repeat==='Monthly')return d.getDate()===start.getDate();
@@ -978,7 +979,8 @@ function questEditor(mode='create', questId=null, defaults={}){
     <div class="field full"><label>Description (Optional)</label><textarea id="qeDesc">${esc(q?.description||'')}</textarea></div>
     <div class="field"><label>Start Date</label><input id="qeStartDate" type="date" value="${q?.startDate||todayISO()}"></div><div class="field"><label>Start Time</label><input id="qeStartTime" type="time" value="${q?.startTime||currentTimeHM()}"></div>
     <div class="field"><label>Time Limit Date</label><input id="qeEndDate" type="date" value="${q?.timeLimitDate||todayISO()}"></div><div class="field"><label>Time Limit Time</label><input id="qeEndTime" type="time" value="${q?.timeLimitTime||''}"></div>
-    <div class="field"><label>Repeat</label><select id="qeRepeat" onchange="toggleCustomRepeat()">${['Never','Daily','Weekly','Monthly','Custom'].map(x=>`<option ${x===(q?.repeat||'Never')?'selected':''}>${x}</option>`).join('')}</select><div id="customRepeatWrap" style="${(q?.repeat||'Never')==='Custom'?'':'display:none'}"><div class="day-picker">${['S','M','T','W','T','F','S'].map((d,i)=>`<button type="button" class="day-dot ${(q?.repeatDays||[]).includes(i)?'selected':''}" data-day="${i}" onclick="this.classList.toggle('selected')">${d}</button>`).join('')}</div></div></div>
+    <div class="field"><label>Repeat</label><select id="qeRepeat" onchange="toggleRepeatOptions()">${['Never','Daily','Weekly','Monthly','Custom'].map(x=>`<option ${x===(q?.repeat||'Never')?'selected':''}>${x}</option>`).join('')}</select><div id="customRepeatWrap" style="${(q?.repeat||'Never')==='Custom'?'':'display:none'}"><div class="day-picker">${['S','M','T','W','T','F','S'].map((d,i)=>`<button type="button" class="day-dot ${(q?.repeatDays||[]).includes(i)?'selected':''}" data-day="${i}" onclick="this.classList.toggle('selected')">${d}</button>`).join('')}</div></div></div>
+    <div class="field" id="repeatEndsWrap" style="${(q?.repeat||'Never')!=='Never'?'':'display:none'}"><label>Repeat Ends</label><select id="qeRepeatEnds" onchange="toggleRepeatEndDate()"><option value="Never" ${!q?.repeatEndDate?'selected':''}>Never</option><option value="On Date" ${q?.repeatEndDate?'selected':''}>On Date</option></select><div id="repeatEndDateWrap" style="${q?.repeatEndDate?'':'display:none'};margin-top:8px"><label>End Date</label><input id="qeRepeatEndDate" type="date" value="${q?.repeatEndDate||''}"><div class="sub small" style="margin-top:6px">The end date is inclusive.</div></div></div>
     <div class="field"><label>Reminder</label><select id="qeReminder" onchange="toggleCustomReminder()">${['No Reminder','At due time','1 day before','1 week before','1 month before','Custom'].map(x=>`<option ${x===(q?.reminder||'No Reminder')?'selected':''}>${x}</option>`).join('')}</select></div>
     <div class="field" id="customReminderDateWrap" style="${(q?.reminder||'No Reminder')==='Custom'?'':'display:none'}"><label>Reminder Date</label><input id="qeReminderDate" type="date" value="${q?.reminderDate||''}"></div>
     <div class="field" id="customReminderTimeWrap" style="${(q?.reminder||'No Reminder')==='Custom'?'':'display:none'}"><label>Reminder Time (Optional)</label><input id="qeReminderTime" type="time" value="${q?.reminderTime||''}"><div class="sub small" style="margin-top:6px">Leave blank for end of day.</div></div>
@@ -1000,6 +1002,8 @@ function deleteQuest(id){
   save();go(state.detailReturn||'questList');
 }
 function toggleCustomRepeat(){const e=document.getElementById('customRepeatWrap');if(e)e.style.display=document.getElementById('qeRepeat')?.value==='Custom'?'':'none'}
+function toggleRepeatOptions(){const repeating=document.getElementById('qeRepeat')?.value!=='Never';toggleCustomRepeat();const e=document.getElementById('repeatEndsWrap');if(e)e.style.display=repeating?'':'none';if(!repeating){const sel=document.getElementById('qeRepeatEnds');if(sel)sel.value='Never';toggleRepeatEndDate()}}
+function toggleRepeatEndDate(){const on=document.getElementById('qeRepeatEnds')?.value==='On Date';const e=document.getElementById('repeatEndDateWrap');if(e)e.style.display=on?'':'none'}
 function toggleCustomReminder(){const on=document.getElementById('qeReminder')?.value==='Custom';['customReminderDateWrap','customReminderTimeWrap'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=on?'':'none'})}
 function pickEditorStars(n){createStars=n;document.querySelectorAll('#qeStars .star').forEach(el=>{const on=Number(el.dataset.n)<=n;el.classList.toggle('gold',on);el.classList.toggle('empty',!on)})}
 function refreshQuestEditor(mode,id,cornerChanged=false,chapterChanged=false){
@@ -1013,6 +1017,11 @@ function saveQuestEditor(mode,id){
   const type=document.getElementById('qeType').value;
   const sub=type==='Cornerstone Quest'?(document.getElementById('qeSub')?.value||''):'';
   if(type==='Cornerstone Quest'&&!sub){alert('Choose a Sub-Quest for this Active Quest.');return}
+  const repeat=document.getElementById('qeRepeat').value;
+  const repeatEnds=document.getElementById('qeRepeatEnds')?.value||'Never';
+  const repeatEndDate=(repeat!=='Never'&&repeatEnds==='On Date')?(document.getElementById('qeRepeatEndDate')?.value||''):'';
+  if(repeat!=='Never'&&repeatEnds==='On Date'&&!repeatEndDate){alert('Choose an End Date for this recurring Quest.');return}
+  if(repeatEndDate&&repeatEndDate<(document.getElementById('qeStartDate').value||todayISO())){alert('Repeat End Date cannot be before the Start Date.');return}
   const reminder=document.getElementById('qeReminder').value;
   const reminderDate=document.getElementById('qeReminderDate')?.value||'';
   const reminderTime=document.getElementById('qeReminderTime')?.value||'';
@@ -1027,7 +1036,8 @@ function saveQuestEditor(mode,id){
     startTime:document.getElementById('qeStartTime').value,
     timeLimitDate:endDate,
     timeLimitTime:document.getElementById('qeEndTime').value,
-    repeat:document.getElementById('qeRepeat').value,
+    repeat,
+    repeatEndDate,
     repeatDays:[...document.querySelectorAll('#customRepeatWrap .day-dot.selected')].map(x=>Number(x.dataset.day)),
     reminder,
     reminderDate:reminder==='Custom'?reminderDate:'',
@@ -1042,7 +1052,7 @@ function saveQuestEditor(mode,id){
       x.parentSubQuestId=base.parentSubQuestId;
       x.type=base.type;x.priority=base.priority;
     });
-    if(isRecurring(q))propagateRecurringPlacement(q);
+    if(isRecurring(q)){const sid=q.seriesId||q.id;state.quests.filter(x=>(x.seriesId||x.id)===sid).forEach(x=>{x.repeat=base.repeat;x.repeatDays=[...(base.repeatDays||[])];x.repeatEndDate=base.repeatEndDate;x.seriesStartDate=q.seriesStartDate||q.startDate});propagateRecurringPlacement(q);}
     save();state.currentQuest={kind:'quest',...q};go('questDetail');return;
   }
   const t2=getTutorial('t2');
@@ -1504,18 +1514,21 @@ function paperStyle(i){const pos=[[7,7,-4],[40,9,3],[18,34,2],[52,38,-3],[5,61,4
 function openAnnouncement(id){const a=state.announcements.find(x=>x.id===id);if(!a)return;a.read=true;state.currentAnnouncementId=id;save();go('announcementDetail')}
 function setBulletinPanel(panel){state.bulletinPanel=panel;save();render()}
 let bulletinTouchX=null;function bulletinTouchStart(e){bulletinTouchX=e.touches?.[0]?.clientX??null}function bulletinTouchEnd(e){if(bulletinTouchX==null)return;const dx=(e.changedTouches?.[0]?.clientX??bulletinTouchX)-bulletinTouchX;bulletinTouchX=null;if(Math.abs(dx)<45)return;setBulletinPanel(dx<0?'notes':'announcements')}
-function bulletinBoard(){ensureMissedRecurringAnnouncements();const kind=state.bulletinPanel==='notes'?'personal':'system',papers=bulletinPapers(kind),title=kind==='system'?'ANNOUNCEMENTS':'NOTES TO SELF';return `<div class="screen"><h2>Bulletin Board</h2><div class="bulletin-shell" ontouchstart="bulletinTouchStart(event)" ontouchend="bulletinTouchEnd(event)"><div class="bulletin-header">${title}</div><div class="cork">${papers.map((a,i)=>`<div class="paper-note ${a.read?'':'unread'}" style="${paperStyle(i)}" onclick="openAnnouncement('${a.id}')"><span class="paper-pin">●</span><div class="scribble">━━━━<br>━━━━━━<br>━━━<br>━━━━━</div></div>`).join('')}${kind==='personal'?`<button class="btn add-note-board" style="width:auto" onclick="createPersonalNote()">＋ Note</button>`:''}<div class="archive-box" onclick="go('announcementArchive')">ARCHIVE</div></div><div class="board-dots">${kind==='system'?'● ○':'○ ●'}</div></div><div class="sub small center">Swipe left/right to switch panels.</div><button class="btn ghost" onclick="navHome()">← Back to Settlement</button></div>`}
-function createPersonalNote(){const title=prompt('Note title');if(!title)return;const body=prompt('Note to self')||'';addAnnouncement({kind:'personal',title,body});state.bulletinPanel='notes';render()}
+function bulletinBoard(){ensureMissedRecurringAnnouncements();const kind=state.bulletinPanel==='notes'?'personal':'system',papers=bulletinPapers(kind),title=kind==='system'?'ANNOUNCEMENTS':'NOTES TO SELF';return `<div class="screen"><h2>Bulletin Board</h2><div class="bulletin-shell" ontouchstart="bulletinTouchStart(event)" ontouchend="bulletinTouchEnd(event)"><div class="bulletin-header">${title}</div><div class="cork">${papers.map((a,i)=>`<div class="paper-note ${a.read?'':'unread'}" style="${paperStyle(i)}" onclick="openAnnouncement('${a.id}')"><span class="paper-pin">●</span><div class="scribble">━━━━<br>━━━━━━<br>━━━<br>━━━━━</div>${a.imageData?'<span class="paper-photo-mark">▧</span>':''}</div>`).join('')}${kind==='personal'?`<button class="btn add-note-board" style="width:auto" onclick="createPersonalNote()">＋ Note</button>`:''}<div class="archive-box" onclick="go('announcementArchive')">ARCHIVE</div></div><div class="board-dots">${kind==='system'?'● ○':'○ ●'}</div></div><div class="sub small center">Swipe left/right to switch panels.</div><button class="btn ghost" onclick="navHome()">← Back to Settlement</button></div>`}
+function createPersonalNote(){state.noteDraftImage=null;go('personalNoteCreate')}
+function personalNoteCreate(){return `<div class="screen"><h2>New Note to Self</h2><div class="card"><div class="field"><label>Title</label><input id="noteTitle" placeholder="Note title"></div><div class="field"><label>Note (Optional)</label><textarea id="noteBody" placeholder="Write something to remember..."></textarea></div><div class="field"><label>Picture or Screenshot (Optional)</label><input id="noteImage" type="file" accept="image/*" onchange="previewNoteImage(event)"><img id="noteImagePreview" class="note-image-preview" alt="Attachment preview"></div></div><button class="btn primary" onclick="savePersonalNote()">Pin Note</button><button class="btn ghost" onclick="state.noteDraftImage=null;go('bulletinBoard')">Cancel</button></div>`}
+function previewNoteImage(e){const f=e.target.files?.[0];if(!f){state.noteDraftImage=null;return}if(!f.type.startsWith('image/')){alert('Choose an image file.');e.target.value='';return}const r=new FileReader();r.onload=()=>{state.noteDraftImage=r.result;const img=document.getElementById('noteImagePreview');if(img){img.src=r.result;img.style.display='block'}};r.readAsDataURL(f)}
+function savePersonalNote(){const title=document.getElementById('noteTitle')?.value.trim()||'',body=document.getElementById('noteBody')?.value.trim()||'';if(!title&&!body&&!state.noteDraftImage){alert('Add a title, note, or image.');return}const a={id:'a-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),kind:'personal',title:title||'Note to Self',body,imageData:state.noteDraftImage||null,createdAt:new Date().toISOString(),read:false,archived:false};state.announcements.push(a);state.noteDraftImage=null;state.bulletinPanel='notes';save();go('bulletinBoard')}
 function archiveAnnouncement(id){const a=state.announcements.find(x=>x.id===id);if(!a)return;a.archived=true;save();go('bulletinBoard')}
-function discardAnnouncement(id){if(!confirm('Discard this announcement? This permanently removes it.'))return;state.announcements=state.announcements.filter(x=>x.id!==id);save();go('bulletinBoard')}
-function announcementDetail(){const a=state.announcements.find(x=>x.id===state.currentAnnouncementId);if(!a)return bulletinBoard();return `<div class="screen"><div class="paper-detail"><h2>${esc(a.title)}</h2><p>${esc(a.body)}</p>${a.questId?`<button class="btn" onclick="openLoggedQuest('${a.questId}',false)">View Quest</button>`:''}${a.kind==='personal'?`<button class="btn" onclick="alert('Turn into Quest will open the universal Quest creator in a later pass.')">Turn into Quest</button>`:''}</div><button class="btn" onclick="archiveAnnouncement('${a.id}')">Archive</button><button class="btn danger" onclick="discardAnnouncement('${a.id}')">Discard</button><button class="btn ghost" onclick="go('bulletinBoard')">Back to Bulletin Board</button></div>`}
+function discardAnnouncement(id){if(!confirm('Discard this announcement? This permanently removes it.'))return;state.announcements=state.announcements.filter(x=>x.id!==id);state.currentAnnouncementId=null;state.screen='bulletinBoard';save();render()}
+function announcementDetail(){const a=state.announcements.find(x=>x.id===state.currentAnnouncementId);if(!a)return bulletinBoard();return `<div class="screen"><div class="paper-detail"><h2>${esc(a.title)}</h2><p>${esc(a.body)}</p>${a.imageData?`<img src="${a.imageData}" alt="Attached image">`:''}${a.questId?`<button class="btn" onclick="openLoggedQuest('${a.questId}',false)">View Quest</button>`:''}${a.kind==='personal'?`<button class="btn" onclick="alert('Turn into Quest will open the universal Quest creator in a later pass.')">Turn into Quest</button>`:''}</div><button class="btn" onclick="archiveAnnouncement('${a.id}')">Archive</button><button class="btn danger" onclick="discardAnnouncement('${a.id}')">Discard</button><button class="btn ghost" onclick="go('bulletinBoard')">Back to Bulletin Board</button></div>`}
 function announcementArchive(){const arr=state.announcements.filter(a=>a.archived).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return `<div class="screen archive-list"><h2>Archive</h2>${arr.length?arr.map(a=>`<div class="card" onclick="state.currentAnnouncementId='${a.id}';save();go('announcementDetail')"><strong>${esc(a.title)}</strong><div class="sub small">${a.kind==='system'?'Announcement':'Note to Self'} · ${new Date(a.createdAt).toLocaleDateString()}</div></div>`).join(''):'<div class="card sub">Nothing archived yet.</div>'}<button class="btn ghost" onclick="go('bulletinBoard')">Back to Bulletin Board</button></div>`}
 
 function menu(){return `<div class="screen"><h2>Menu</h2><div class="card"><button class="btn" onclick="go('home')">Return to Settlement</button><button class="btn ghost" onclick="if(confirm('Reset all prototype progress and start over?'))reset()">Reset Prototype / Start Over</button></div></div>`}
 
 function render(){
   ensureMissedRecurringAnnouncements();
-  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,editCompletion,createMenu,createQuestMenu,createBuildingMenu,placeBuilding,trainingGrounds,bulletinBoard,announcementDetail,announcementArchive,hierarchyDetail,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,routineFolder,completedQuestFolder,extendQuest,menu};
+  const map={character,confirmCharacter,arrival,home,questDetail,resolve,reward,editCompletion,createMenu,createQuestMenu,createBuildingMenu,placeBuilding,trainingGrounds,bulletinBoard,announcementDetail,announcementArchive,personalNoteCreate,hierarchyDetail,createQuest,questList,characterProfile,cornerstonePick,placeCornerstone,cornerstoneLanding,cornerstoneCreateMenu,createChapter,createSubQuest,createChildQuest,focusView,focusChoose,dueList,routineFolder,completedQuestFolder,extendQuest,menu};
   const page=(map[state.screen]||home)();
   app().innerHTML=page+trainingIndicator()+((state.screen==='arrival'||state.screen==='character'||state.screen==='confirmCharacter')?'':persistentNav());startTrainingTicker();
 }
